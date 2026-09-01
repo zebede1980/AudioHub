@@ -1,0 +1,36 @@
+services:
+  audiohub:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: audiohub
+    restart: unless-stopped
+    ports:
+      # loopback only — nginx on the host proxies to this port and terminates TLS
+      - "127.0.0.1:8420:8420"
+    volumes:
+      - ./data:/data
+      # Whole drives. Pick specific subfolders as library roots in Settings afterwards (e.g.
+      # container path /library/j/Audiobooks) — mounting the whole drive here does not mean
+      # the whole drive gets scanned.
+      - "J:/:/library/j:ro"
+      # Writable (no :ro) so the Soundgasm importer can save downloaded files under
+      # /library/v/.../Soundgasm/<username>. Everything else about this mount is unchanged.
+      - "V:/:/library/v"
+      # Add more lines here for any other drives/folders you want available to pick from.
+      # - "D:/Audiobooks:/library/audiobooks:ro"
+    environment:
+      PORT: 8420
+      NODE_ENV: production
+      DATABASE_PATH: /data/audiohub.db
+      COVER_CACHE_DIR: /data/cache/covers
+      SESSION_SECRET: ${SESSION_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "true"
+
+networks:
+  default:
+    name: nginx-proxy-nw
+    external: true
