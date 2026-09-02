@@ -8,6 +8,7 @@ import Login from "./routes/Login";
 import LibraryRoots from "./routes/LibraryRoots";
 import FolderBrowser from "./routes/FolderBrowser";
 import Search from "./routes/Search";
+import Tags from "./routes/Tags";
 import PlayerScreen from "./routes/PlayerScreen";
 import Settings from "./routes/Settings";
 import ImportSoundgasm from "./routes/ImportSoundgasm";
@@ -49,6 +50,14 @@ export default function App() {
           element={
             <RequireAuth>
               <Search />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tags"
+          element={
+            <RequireAuth>
+              <Tags />
             </RequireAuth>
           }
         />

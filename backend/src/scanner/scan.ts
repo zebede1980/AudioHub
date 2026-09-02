@@ -236,8 +236,28 @@ export async function scanLibraryRoot(
   }
 
   const { movedFiles, deletedFiles } = reconcileMovesAndDeletions(sqlite, libraryRootId, scanStartedAt);
+  reconcileDeletedFolders(sqlite, libraryRootId, scanStartedAt);
 
   return { ...progress, movedFiles, deletedFiles };
+}
+
+// Folders whose directory no longer exists on disk (removed directly, or emptied out and pruned
+// after their last file was deleted) are never visited by the walk above, so their last_seen_at
+// goes stale exactly like a missing file's. Remove them so they stop showing up in the library.
+// Deepest-first so a folder never briefly outlives its already-deleted children in the parent
+// chain; files.folder_id cascades, cleaning up any file rows the walk didn't already soft-delete.
+function reconcileDeletedFolders(sqlite: Database.Database, libraryRootId: number, scanStartedAt: number) {
+  const stale = sqlite
+    .prepare(
+      `SELECT id FROM folders WHERE library_root_id = ? AND relative_path != '' AND last_seen_at < ?
+       ORDER BY depth DESC`
+    )
+    .all(libraryRootId, scanStartedAt) as { id: number }[];
+
+  const deleteFolder = sqlite.prepare(`DELETE FROM folders WHERE id = ?`);
+  for (const row of stale) {
+    deleteFolder.run(row.id);
+  }
 }
 
 function reconcileMovesAndDeletions(sqlite: Database.Database, libraryRootId: number, scanStartedAt: number) {

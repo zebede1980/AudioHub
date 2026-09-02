@@ -11,6 +11,9 @@ export function useSetRating() {
       queryClient.invalidateQueries({ queryKey: ["folder"] });
       queryClient.invalidateQueries({ queryKey: ["file"] });
       queryClient.invalidateQueries({ queryKey: ["search"] });
+      queryClient.invalidateQueries({ queryKey: ["rated-files"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["play-history"] });
       usePlayerStore.getState().setCurrentFileRating(fileId, rating);
     },
   });

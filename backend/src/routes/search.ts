@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { rawDb } from "../db/client.js";
+import { tagsByFileId } from "../db/tagLookup.js";
 
 export default async function searchRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", fastify.requireAuth);
@@ -42,9 +43,12 @@ export default async function searchRoutes(fastify: FastifyInstance) {
            WHERE files_fts MATCH ? AND f.deleted_at IS NULL
            ORDER BY rank LIMIT ? OFFSET ?`
         )
-        .all(ftsQuery, pageSize, offset);
+        .all(ftsQuery, pageSize, offset) as { id: number }[];
 
-      reply.send({ folders: folderRows, files: fileRows, page, pageSize });
+      const tagsByFile = tagsByFileId(fileRows.map((f) => f.id));
+      const filesWithTags = fileRows.map((f) => ({ ...f, tags: tagsByFile.get(f.id) ?? [] }));
+
+      reply.send({ folders: folderRows, files: filesWithTags, page, pageSize });
     }
   );
 }

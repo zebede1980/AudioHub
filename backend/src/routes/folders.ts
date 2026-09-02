@@ -3,10 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { folders, files, ratings, folderRatings, libraryRoots } from "../db/schema.js";
+import { folders, files, ratings, folderRatings, libraryRoots, transcripts } from "../db/schema.js";
 import { resolveCoverAbsolutePath } from "../scanner/coverCache.js";
+import { tagsByFileId } from "../db/tagLookup.js";
 import { imageMimeTypeForExtension } from "../streaming/rangeStream.js";
 import { startScan } from "../scanner/scanManager.js";
+import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
 
 function parsePagination(query: Record<string, unknown>) {
   const page = Math.max(1, Number(query.page) || 1);
@@ -77,6 +79,7 @@ export default async function foldersRoutes(fastify: FastifyInstance) {
         fs.rmSync(absPath, { recursive: true, force: true });
         deletedCount++;
         touchedRoots.set(row.libraryRootId, row.containerPath);
+        pruneEmptyAncestorDirs(path.dirname(absPath), row.containerPath);
       } catch (err) {
         fastify.log.error({ err, absPath }, "failed to delete rated folder");
       }
@@ -147,20 +150,26 @@ export default async function foldersRoutes(fastify: FastifyInstance) {
           durationSec: files.durationSec,
           coverImagePath: files.coverImagePath,
           rating: ratings.rating,
+          hasTranscript: transcripts.id,
         })
         .from(files)
         .leftJoin(ratings, eq(ratings.fileId, files.id))
+        .leftJoin(transcripts, eq(transcripts.fileId, files.id))
         .where(and(eq(files.folderId, id), isNull(files.deletedAt)))
         .orderBy(order(sortColumn))
         .limit(pageSize)
         .offset(offset)
-        .all();
+        .all()
+        .map((row) => ({ ...row, hasTranscript: row.hasTranscript !== null }));
+
+      const tagsByFile = tagsByFileId(fileRows.map((f) => f.id));
+      const filesWithTags = fileRows.map((f) => ({ ...f, tags: tagsByFile.get(f.id) ?? [] }));
 
       reply.send({
         folder: { ...folder, rating: folderRatingRow?.rating ?? null },
         breadcrumb,
         subfolders,
-        files: fileRows,
+        files: filesWithTags,
         page,
         pageSize,
       });

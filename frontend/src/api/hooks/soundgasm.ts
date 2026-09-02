@@ -76,19 +76,15 @@ export function useSoundgasmDownloadStatus(jobId: string | undefined) {
   });
 }
 
-export function useResolveDownloadedFile(jobId: string | undefined) {
-  return useMutation({
-    mutationFn: (postUrl: string) =>
-      api.get<{ fileId: number }>(`/scrape/soundgasm/download/${jobId}/file?postUrl=${encodeURIComponent(postUrl)}`),
-  });
-}
-
 export function useSoundgasmDownloadFolder(jobId: string | undefined, enabled: boolean) {
   return useQuery<{ folderId: number }>({
     queryKey: ["soundgasm-download-folder", jobId],
     queryFn: () => api.get(`/scrape/soundgasm/download/${jobId}/folder`),
     enabled: enabled && jobId !== undefined,
-    retry: 3,
+    // The library rescan that creates this folder record runs after the job finishes and can lag
+    // behind on a slow/network-mounted library root, so keep retrying well past a few seconds
+    // rather than giving up and leaving the link permanently unclickable.
+    retry: 20,
     retryDelay: 1500,
   });
 }

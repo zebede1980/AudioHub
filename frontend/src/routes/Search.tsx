@@ -6,6 +6,7 @@ import { fileCoverUrl, folderCoverUrl } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
 import { useSetFolderRating } from "../api/hooks/ratings";
 import RatingStars from "../components/RatingStars";
+import TagList from "../components/TagList";
 import type { FileDetail } from "../api/types";
 
 export default function Search() {
@@ -108,6 +109,11 @@ export default function Search() {
                   >
                     {subtitle}
                   </Link>
+                )}
+                {file.tags.length > 0 && (
+                  <div className="mt-1">
+                    <TagList tags={file.tags} />
+                  </div>
                 )}
               </div>
               <RatingStars value={file.rating} readOnly size="sm" />

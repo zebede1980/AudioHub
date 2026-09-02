@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { LibraryRoot, ScanStatus, FolderSummary, RatedFile, RatedFolder } from "../types";
+import type { LibraryRoot, ScanStatus, FolderSummary, RatedFile, RatedFolder, RecentFile } from "../types";
 
 export function useLibraryRoots() {
   return useQuery<LibraryRoot[]>({
@@ -68,6 +68,13 @@ export function useDeleteRatedFiles() {
       queryClient.invalidateQueries({ queryKey: ["root-folder"] });
       queryClient.invalidateQueries({ queryKey: ["search"] });
     },
+  });
+}
+
+export function useRecentFiles() {
+  return useQuery<RecentFile[]>({
+    queryKey: ["recent-files"],
+    queryFn: () => api.get("/files/recent"),
   });
 }
 

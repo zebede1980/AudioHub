@@ -1,0 +1,50 @@
+##
+## Example compose file for a cloud/remote AudioHub instance — the sync target that a local
+## AudioHub pushes its 4/5-star files to (see the "Cloud sync" section in Settings).
+##
+## Differences from the main docker-compose.yml (which is written for the machine that owns the
+## real library and builds its own image):
+##   - Pulls a prebuilt image from GHCR instead of building from source, published by
+##     .github/workflows/docker-publish.yml on every push to main.
+##   - One writable ./library volume instead of mounting whole drives — the cloud box doesn't
+##     hold the full library, only what gets synced in under library/Synced/...
+##
+## First-time setup:
+##   1. Push to main once so the publish workflow runs, then make the GHCR package public
+##      (repo -> Packages -> audiohub -> Package settings -> Change visibility), or `docker
+##      login ghcr.io` on this host with a PAT that has `read:packages` — otherwise `pull` below
+##      will fail with "unauthorized".
+##   2. Copy .env.example to .env here and fill it in (see that file for details).
+##   3. docker compose -f docker-compose.cloud.yml up -d
+##   4. In the AudioHub UI: Settings -> Add a folder -> point it at /library (creates the
+##      library root), then Settings -> Cloud sync -> "Accept pushes from a local instance" ->
+##      pick that folder, generate a key, and paste this server's URL + that key into the
+##      "Push to a cloud instance" section on your local AudioHub.
+##
+## To update to the latest published image later:
+##   docker compose -f docker-compose.cloud.yml pull && docker compose -f docker-compose.cloud.yml up -d
+##
+services:
+  audiohub:
+    image: ghcr.io/zebede1980/audiohub:latest
+    container_name: audiohub-cloud
+    restart: unless-stopped
+    ports:
+      # Loopback only — this host's own nginx (or whatever terminates TLS for your domain) proxies
+      # to this port. Do not publish this directly to the internet.
+      - "127.0.0.1:8420:8420"
+    volumes:
+      - ./data:/data
+      # Everything synced in from a local instance lands under here, at /library/Synced/...
+      - ./library:/library
+    environment:
+      PORT: 8420
+      NODE_ENV: production
+      DATABASE_PATH: /data/audiohub.db
+      COVER_CACHE_DIR: /data/cache/covers
+      WHISPER_MODEL_DIR: /data/whisper-models
+      SESSION_SECRET: ${SESSION_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "true"

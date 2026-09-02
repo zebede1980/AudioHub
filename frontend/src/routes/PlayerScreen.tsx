@@ -1,10 +1,105 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePlayerStore } from "../player/usePlayerStore";
 import { fileCoverUrl } from "../api/client";
 import RatingStars from "../components/RatingStars";
+import TagEditor from "../components/TagEditor";
 import { useSetRating } from "../api/hooks/ratings";
+import { useFileTags } from "../api/hooks/tags";
+import {
+  useTranscript,
+  useTranscribeFile,
+  useTranscriptionStatus,
+  useDeleteTranscript,
+} from "../api/hooks/transcribe";
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
+function TagsSection({ fileId, onEdit }: { fileId: number; onEdit: () => void }) {
+  const { data: fileTags } = useFileTags(fileId);
+
+  return (
+    <div className="w-full space-y-2 rounded-lg border border-slate-800 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-slate-400">Tags</h2>
+        <button onClick={onEdit} className="text-xs text-slate-500 underline hover:text-indigo-400">
+          Edit
+        </button>
+      </div>
+
+      {fileTags && fileTags.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {fileTags.map((tag) => (
+            <span key={tag.id} className="rounded-full bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-slate-500">No tags yet.</div>
+      )}
+    </div>
+  );
+}
+
+function TranscriptSection({ fileId }: { fileId: number }) {
+  const { data: transcript, isLoading } = useTranscript(fileId);
+  const transcribeFile = useTranscribeFile();
+  const deleteTranscript = useDeleteTranscript();
+  const { data: status } = useTranscriptionStatus(true);
+
+  const myEntry = status?.files?.find((f) => f.fileId === fileId);
+  const isThisFileActive =
+    myEntry && (myEntry.status === "queued" || myEntry.status === "transcribing") && (status?.status === "downloading-model" || status?.status === "running");
+
+  if (isLoading) return null;
+
+  return (
+    <div className="w-full space-y-2 rounded-lg border border-slate-800 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-slate-400">Transcript</h2>
+        {transcript && (
+          <button
+            onClick={() => deleteTranscript.mutate(fileId)}
+            className="text-xs text-slate-500 underline hover:text-red-400"
+          >
+            Delete
+          </button>
+        )}
+      </div>
+
+      {isThisFileActive ? (
+        <div className="text-sm text-slate-400">
+          {status?.status === "downloading-model"
+            ? "Downloading speech-to-text model (one-time, ~550MB)…"
+            : myEntry?.status === "transcribing"
+              ? "Transcribing…"
+              : "Queued…"}
+        </div>
+      ) : transcript ? (
+        <p className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-slate-300">{transcript.text}</p>
+      ) : myEntry?.status === "error" ? (
+        <div className="space-y-2">
+          <div className="text-sm text-red-400">Transcription failed: {myEntry.error}</div>
+          <button
+            onClick={() => transcribeFile.mutate(fileId)}
+            className="rounded bg-indigo-600 px-3 py-1 text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => transcribeFile.mutate(fileId)}
+          disabled={transcribeFile.isPending}
+          className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
+        >
+          Transcribe this file
+        </button>
+      )}
+    </div>
+  );
+}
 
 function formatTime(sec: number): string {
   if (!Number.isFinite(sec)) return "0:00";
@@ -29,6 +124,7 @@ export default function PlayerScreen() {
   const setVolume = usePlayerStore((s) => s.setVolume);
   const setPlaybackRate = usePlayerStore((s) => s.setPlaybackRate);
   const setRating = useSetRating();
+  const [editingTags, setEditingTags] = useState(false);
 
   if (!currentFile) {
     return (
@@ -129,6 +225,12 @@ export default function PlayerScreen() {
           ))}
         </select>
       </div>
+
+      <TagsSection fileId={currentFile.id} onEdit={() => setEditingTags(true)} />
+
+      <TranscriptSection fileId={currentFile.id} />
+
+      {editingTags && <TagEditor fileId={currentFile.id} onClose={() => setEditingTags(false)} />}
     </div>
   );
 }

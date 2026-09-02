@@ -3,9 +3,10 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db, rawDb } from "../db/client.js";
 import { files, libraryRoots } from "../db/schema.js";
+import { config } from "../config.js";
 import { readAudioTags } from "../scanner/metadata.js";
 import { computeFingerprint } from "../scanner/fingerprint.js";
-import { convertWavToMp3 } from "./ffmpeg.js";
+import { convertToMp3 } from "./ffmpeg.js";
 
 export type FileConversionStatus = "queued" | "converting" | "done" | "error" | "skipped";
 
@@ -103,10 +104,11 @@ async function runQueue(job: ConversionJobState): Promise<void> {
 }
 
 /**
- * Converts one WAV file to MP3 and swaps the existing `files` row in place (same id) so ratings,
- * play history, and playback position — all keyed on file id — survive the swap untouched. This
- * deliberately bypasses the scanner's fingerprint-based move detection: transcoding changes every
- * byte of the file, so the scanner would see "old file gone, new file appeared" and orphan them.
+ * Converts one lossless source file (WAV, FLAC, ...) to MP3 and swaps the existing `files` row in
+ * place (same id) so ratings, play history, and playback position — all keyed on file id —
+ * survive the swap untouched. This deliberately bypasses the scanner's fingerprint-based move
+ * detection: transcoding changes every byte of the file, so the scanner would see "old file gone,
+ * new file appeared" and orphan them.
  */
 async function convertOneFile(job: ConversionJobState, entry: FileConversionState): Promise<void> {
   const row = db
@@ -124,16 +126,18 @@ async function convertOneFile(job: ConversionJobState, entry: FileConversionStat
     .get();
 
   if (!row) throw new Error("file no longer exists in the library index");
-  if (row.extension !== ".wav") throw new Error("file is no longer a WAV (already converted or changed on disk)");
+  if (!config.audioConversion.sourceExtensions.includes(row.extension)) {
+    throw new Error("file is no longer a convertible format (already converted or changed on disk)");
+  }
 
-  const absWavPath = path.join(row.containerPath, row.relativePath);
+  const absSourcePath = path.join(row.containerPath, row.relativePath);
   entry.relativePath = row.relativePath;
 
-  const wavStat = fs.statSync(absWavPath);
-  entry.sizeBytesBefore = wavStat.size;
+  const sourceStat = fs.statSync(absSourcePath);
+  entry.sizeBytesBefore = sourceStat.size;
 
-  const dir = path.dirname(absWavPath);
-  const base = path.basename(absWavPath, path.extname(absWavPath));
+  const dir = path.dirname(absSourcePath);
+  const base = path.basename(absSourcePath, path.extname(absSourcePath));
   const finalAbsPath = path.join(dir, `${base}.mp3`);
   const tempAbsPath = path.join(dir, `${base}.mp3.converting`);
 
@@ -141,7 +145,7 @@ async function convertOneFile(job: ConversionJobState, entry: FileConversionStat
     throw new Error(`an .mp3 with the same name already exists alongside it: ${base}.mp3`);
   }
 
-  await convertWavToMp3(absWavPath, tempAbsPath, job.bitrateKbps);
+  await convertToMp3(absSourcePath, tempAbsPath, job.bitrateKbps);
 
   try {
     const tempStat = fs.statSync(tempAbsPath);
@@ -158,7 +162,7 @@ async function convertOneFile(job: ConversionJobState, entry: FileConversionStat
     }
 
     fs.renameSync(tempAbsPath, finalAbsPath);
-    fs.rmSync(absWavPath, { force: true });
+    fs.rmSync(absSourcePath, { force: true });
 
     const relativeDir = path.dirname(row.relativePath);
     const newRelativePath = relativeDir === "." ? `${base}.mp3` : `${relativeDir}/${base}.mp3`;

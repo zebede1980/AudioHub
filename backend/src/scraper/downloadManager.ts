@@ -41,7 +41,7 @@ export function getDownloadJob(jobId: string): DownloadJobState | undefined {
   return jobs.get(jobId);
 }
 
-function sanitizeForFilesystem(name: string, maxLength: number): string {
+export function sanitizeForFilesystem(name: string, maxLength: number): string {
   const cleaned = name
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
     .replace(/\s+/g, " ")
@@ -60,7 +60,10 @@ export function startSoundgasmDownload(
   username: string,
   posts: SoundgasmPost[]
 ): DownloadJobState {
-  const folderRelativePath = path.join("Soundgasm", sanitizeForFilesystem(username, 100));
+  // Always forward-slash, matching the scanner's relativePath convention (scan.ts joinRel) — using
+  // the native path.join here would emit backslashes on Windows and permanently break the
+  // relativePath-based DB lookups (download/:jobId/file and /folder) on a non-Docker/Windows host.
+  const folderRelativePath = ["Soundgasm", sanitizeForFilesystem(username, 100)].join("/");
   const destDir = path.join(containerPath, folderRelativePath);
   const job: DownloadJobState = {
     id: randomUUID(),
@@ -90,7 +93,7 @@ async function processItems(job: DownloadJobState, items: DownloadItem[]): Promi
       const audioUrl = await extractAudioUrl(item.postUrl);
       const filename = `${sanitizeForFilesystem(item.title, 150)}${extensionFromUrl(audioUrl)}`;
       const destPath = path.join(job.destDir, filename);
-      item.relativePath = path.join(job.folderRelativePath, filename);
+      item.relativePath = [job.folderRelativePath, filename].join("/");
 
       if (fs.existsSync(destPath)) {
         item.status = "skipped";

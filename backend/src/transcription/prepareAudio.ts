@@ -1,26 +1,20 @@
 import { spawn } from "node:child_process";
 import { config } from "../config.js";
 
-/**
- * Transcodes a lossless audio file (WAV, FLAC, ...) to MP3 via the system `ffmpeg` binary, at a
- * fixed CBR bitrate. Input format is auto-detected by ffmpeg from the file's content, not its
- * extension, so this works for any input container/codec ffmpeg can decode.
- */
-export function convertToMp3(inputPath: string, outputPath: string, bitrateKbps: number): Promise<void> {
+/** Extracts a 16kHz mono WAV from any ffmpeg-decodable source file — the format whisper.cpp expects. */
+export function extractWhisperWav(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(config.ffmpegPath, [
       "-y",
       "-i",
       inputPath,
       "-vn",
-      "-map_metadata",
-      "0",
-      "-codec:a",
-      "libmp3lame",
-      "-b:a",
-      `${bitrateKbps}k`,
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
       "-f",
-      "mp3",
+      "wav",
       outputPath,
     ]);
 

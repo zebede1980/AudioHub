@@ -1,13 +1,22 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { usePlayHistory, useClearPlayHistory } from "../api/hooks/history";
-import { api, fileCoverUrl } from "../api/client";
+import { useSetRating } from "../api/hooks/ratings";
+import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
-import type { FileDetail } from "../api/types";
+import FileRow from "../components/FileRow";
+import TagEditor from "../components/TagEditor";
+import TranscriptModal from "../components/TranscriptModal";
+import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
 export default function History() {
   const { data, isLoading } = usePlayHistory();
   const clear = useClearPlayHistory();
+  const setRating = useSetRating();
   const play = usePlayerStore((s) => s.play);
+  const currentFile = usePlayerStore((s) => s.currentFile);
+  const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
+  const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
   async function playFile(fileId: number) {
     const file = await api.get<FileDetail>(`/files/${fileId}`);
@@ -34,42 +43,54 @@ export default function History() {
       {isLoading && <div className="text-slate-400">Loading…</div>}
 
       <div className="space-y-1">
-        {data?.map((entry) => (
-          <div
-            key={entry.historyId}
-            role="button"
-            tabIndex={0}
-            onClick={() => playFile(entry.fileId)}
-            onKeyDown={(e) => e.key === "Enter" && playFile(entry.fileId)}
-            className="flex w-full cursor-pointer items-center gap-3 rounded px-2 py-2 text-left hover:bg-slate-800"
-          >
-            {entry.coverImagePath ? (
-              <img src={fileCoverUrl(entry.fileId)} alt="" className="h-10 w-10 flex-shrink-0 rounded object-cover" />
-            ) : (
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-slate-800 text-slate-600">
-                ♪
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm">{entry.title ?? entry.filename}</div>
-              <div className="flex min-w-0 items-center gap-1 truncate text-xs text-slate-400">
-                <Link
-                  to={`/library/folder/${entry.folderId}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="truncate hover:text-indigo-400 hover:underline"
-                >
-                  {entry.folderName}
-                </Link>
-                <span>·</span>
-                <span>{new Date(entry.playedAt).toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-        ))}
+        {data?.map((entry) => {
+          const file: FileRowType = {
+            id: entry.fileId,
+            filename: entry.filename,
+            title: entry.title,
+            trackNumber: entry.trackNumber,
+            durationSec: entry.durationSec,
+            coverImagePath: entry.coverImagePath,
+            rating: entry.rating,
+            hasTranscript: entry.hasTranscript,
+            tags: entry.tags,
+          };
+          return (
+            <FileRow
+              key={entry.historyId}
+              file={file}
+              isCurrent={currentFile?.id === entry.fileId}
+              onPlay={() => playFile(entry.fileId)}
+              onRate={(rating) => setRating.mutate({ fileId: entry.fileId, rating })}
+              onViewTranscript={() => setViewingTranscriptFileId(entry.fileId)}
+              onEditTags={() => setEditingTagsFileId(entry.fileId)}
+              subtitle={
+                <div className="flex min-w-0 items-center gap-1 truncate text-xs text-slate-400">
+                  <Link
+                    to={`/library/folder/${entry.folderId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="truncate hover:text-indigo-400 hover:underline"
+                  >
+                    {entry.folderName}
+                  </Link>
+                  <span>·</span>
+                  <span>{new Date(entry.playedAt).toLocaleString()}</span>
+                </div>
+              }
+            />
+          );
+        })}
       </div>
 
       {!isLoading && data?.length === 0 && (
         <div className="p-6 text-center text-slate-500">Nothing played yet.</div>
+      )}
+
+      {viewingTranscriptFileId !== null && (
+        <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
+      )}
+      {editingTagsFileId !== null && (
+        <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
       )}
     </div>
   );

@@ -2,17 +2,21 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useLibraryRoots } from "../api/hooks/library";
+import { useFolder } from "../api/hooks/folder";
+import { useSetRating } from "../api/hooks/ratings";
 import {
   useListSoundgasmPosts,
   useResolveSoundgasmPost,
-  useResolveDownloadedFile,
-  useRetrySoundgasmDownload,
   useStartSoundgasmDownload,
+  useRetrySoundgasmDownload,
   useSoundgasmDownloadStatus,
   useSoundgasmDownloadFolder,
   type SoundgasmPost,
 } from "../api/hooks/soundgasm";
 import { usePlayerStore } from "../player/usePlayerStore";
+import FileRow from "../components/FileRow";
+import TagEditor from "../components/TagEditor";
+import TranscriptModal from "../components/TranscriptModal";
 import type { FileDetail } from "../api/types";
 
 const AUTO_SELECT_THRESHOLD = 10;
@@ -25,28 +29,147 @@ const STATUS_STYLE: Record<string, string> = {
   error: "text-red-400",
 };
 
+/**
+ * Self-contained view of one download job (bulk profile import or a single quick import).
+ * Each instance polls its own job/folder state, so multiple imports run fully independently.
+ */
+function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: string; onDismiss?: () => void }) {
+  const job = useSoundgasmDownloadStatus(jobId);
+  const retry = useRetrySoundgasmDownload(jobId);
+  const folderLink = useSoundgasmDownloadFolder(jobId, job.data !== undefined && job.data.status !== "running");
+  const { data: folder } = useFolder(folderLink.data?.folderId, { sort: "track" });
+  const setRating = useSetRating();
+  const play = usePlayerStore((s) => s.play);
+  const currentFile = usePlayerStore((s) => s.currentFile);
+  const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
+  const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
+
+  if (!job.data) return null;
+
+  async function playFile(fileId: number) {
+    const file = await api.get<FileDetail>(`/files/${fileId}`);
+    play(file);
+  }
+
+  const failedItems = job.data.items.filter((i) => i.status === "error");
+  const busy = job.data.status === "running" || retry.isPending;
+  // While the job is running, show every item so progress is visible; once it's settled, the
+  // finished tracks show up in the folder listing below, so only errors still need this list.
+  const progressItems = busy ? job.data.items : failedItems;
+
+  return (
+    <div className="space-y-2 rounded border border-slate-800 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
+        <span>
+          {job.data.status === "running" ? "Downloading…" : job.data.status === "ok" ? "Done." : "Job failed."}{" "}
+          {job.data.items.filter((i) => i.status === "done" || i.status === "skipped").length} /{" "}
+          {job.data.items.length} processed
+          {failedItems.length > 0 ? `, ${failedItems.length} failed` : ""}
+          {" — "}
+          {folderLink.data ? (
+            <Link to={`/library/folder/${folderLink.data.folderId}`} className="text-indigo-400 hover:underline">
+              {label}
+            </Link>
+          ) : (
+            <span>{label}</span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {failedItems.length > 0 && (
+            <button
+              onClick={() => retry.mutate(undefined)}
+              disabled={busy}
+              className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium disabled:opacity-50"
+            >
+              Retry all failed ({failedItems.length})
+            </button>
+          )}
+          {!busy && onDismiss && (
+            <button onClick={onDismiss} title="Dismiss" className="text-slate-500 hover:text-slate-300">
+              ✕
+            </button>
+          )}
+        </span>
+      </div>
+
+      {progressItems.length > 0 && (
+        <div className="max-h-64 space-y-1 overflow-y-auto rounded border border-slate-800 p-2 text-sm">
+          {progressItems.map((item) => (
+            <div key={item.postUrl} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1 truncate" title={item.title}>
+                {item.title}
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className={`text-xs ${STATUS_STYLE[item.status]}`} title={item.error}>
+                  {item.status}
+                </span>
+                {item.status === "error" && (
+                  <button
+                    onClick={() => retry.mutate([item.postUrl])}
+                    disabled={busy}
+                    className="rounded bg-slate-800 px-2 py-0.5 text-xs disabled:opacity-50"
+                  >
+                    Retry
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {folder && folder.files.length > 0 && (
+        <div className="space-y-1">
+          {folder.files.map((file) => (
+            <FileRow
+              key={file.id}
+              file={file}
+              isCurrent={currentFile?.id === file.id}
+              onPlay={() => playFile(file.id)}
+              onRate={(rating) => setRating.mutate({ fileId: file.id, rating })}
+              onViewTranscript={() => setViewingTranscriptFileId(file.id)}
+              onEditTags={() => setEditingTagsFileId(file.id)}
+            />
+          ))}
+          {folder.files.length === folder.pageSize && folderLink.data && (
+            <Link
+              to={`/library/folder/${folderLink.data.folderId}`}
+              className="block py-1 text-center text-xs text-indigo-400 hover:underline"
+            >
+              View full folder →
+            </Link>
+          )}
+        </div>
+      )}
+
+      {viewingTranscriptFileId !== null && (
+        <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
+      )}
+      {editingTagsFileId !== null && (
+        <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
+      )}
+    </div>
+  );
+}
+
 export default function ImportSoundgasm() {
   const [profileUrl, setProfileUrl] = useState("");
   const [listing, setListing] = useState<{ username: string; posts: SoundgasmPost[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
   const [libraryRootId, setLibraryRootId] = useState<number | undefined>(undefined);
-  const [jobId, setJobId] = useState<string | undefined>(undefined);
+  const [bulkJobId, setBulkJobId] = useState<string | undefined>(undefined);
+  const [bulkLabel, setBulkLabel] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [manualPostUrl, setManualPostUrl] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
-  const [playingUrl, setPlayingUrl] = useState<string | null>(null);
-  const [playError, setPlayError] = useState<string | null>(null);
+  const [quickJobs, setQuickJobs] = useState<{ jobId: string; label: string }[]>([]);
 
   const { data: roots } = useLibraryRoots();
   const list = useListSoundgasmPosts();
   const resolvePost = useResolveSoundgasmPost();
-  const startDownload = useStartSoundgasmDownload();
-  const job = useSoundgasmDownloadStatus(jobId);
-  const retry = useRetrySoundgasmDownload(jobId);
-  const resolveFile = useResolveDownloadedFile(jobId);
-  const play = usePlayerStore((s) => s.play);
-  const folderLink = useSoundgasmDownloadFolder(jobId, job.data !== undefined && job.data.status !== "running");
+  const startBulkDownload = useStartSoundgasmDownload();
+  const startQuickDownload = useStartSoundgasmDownload();
 
   const effectiveRootId = libraryRootId ?? roots?.[0]?.id;
 
@@ -57,7 +180,7 @@ export default function ImportSoundgasm() {
     e.preventDefault();
     setError(null);
     setListing(null);
-    setJobId(undefined);
+    setBulkJobId(undefined);
     setFilterText("");
     try {
       const result = await list.mutateAsync(profileUrl);
@@ -70,41 +193,27 @@ export default function ImportSoundgasm() {
     }
   }
 
-  async function onAddManualPost(e: React.FormEvent) {
+  // Fully independent of the profile-listing flow above: resolves and downloads a single post
+  // from any user, one click at a time, so importing several one-off tracks from different
+  // uploaders in a row never depends on (or gets blocked by) whatever profile is currently listed.
+  async function onQuickImport(e: React.FormEvent) {
     e.preventDefault();
     setManualError(null);
+    if (!effectiveRootId) {
+      setManualError("No library root selected.");
+      return;
+    }
     try {
       const { username, post } = await resolvePost.mutateAsync(manualPostUrl);
-      if (listing && listing.username.toLowerCase() !== username.toLowerCase()) {
-        setManualError(
-          `This post belongs to "${username}", not the currently loaded profile "${listing.username}" — list that profile first.`
-        );
-        return;
-      }
-      setListing((prev) =>
-        prev
-          ? { ...prev, posts: prev.posts.some((p) => p.postUrl === post.postUrl) ? prev.posts : [...prev.posts, post] }
-          : { username, posts: [post] }
-      );
-      setSelected((prev) => new Set(prev).add(post.postUrl));
-      setJobId(undefined);
+      const { jobId } = await startQuickDownload.mutateAsync({
+        libraryRootId: effectiveRootId,
+        username,
+        posts: [post],
+      });
+      setQuickJobs((prev) => [{ jobId, label: `Soundgasm/${username}` }, ...prev]);
       setManualPostUrl("");
     } catch (err) {
-      setManualError(err instanceof ApiError ? err.message : "Failed to resolve post");
-    }
-  }
-
-  async function onPlayItem(postUrl: string) {
-    setPlayError(null);
-    setPlayingUrl(postUrl);
-    try {
-      const { fileId } = await resolveFile.mutateAsync(postUrl);
-      const file = await api.get<FileDetail>(`/files/${fileId}`);
-      play(file);
-    } catch (err) {
-      setPlayError(err instanceof ApiError ? err.message : "Failed to play");
-    } finally {
-      setPlayingUrl(null);
+      setManualError(err instanceof ApiError ? err.message : "Failed to import post");
     }
   }
 
@@ -138,12 +247,13 @@ export default function ImportSoundgasm() {
     setError(null);
     try {
       const posts = listing.posts.filter((p) => selected.has(p.postUrl));
-      const { jobId: id } = await startDownload.mutateAsync({
+      const { jobId } = await startBulkDownload.mutateAsync({
         libraryRootId: effectiveRootId,
         username: listing.username,
         posts,
       });
-      setJobId(id);
+      setBulkJobId(jobId);
+      setBulkLabel(`Soundgasm/${listing.username}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to start download");
     }
@@ -153,10 +263,61 @@ export default function ImportSoundgasm() {
     <div className="mx-auto max-w-2xl space-y-4 p-4 pb-24">
       <h1 className="text-lg font-semibold">Import from Soundgasm</h1>
 
+      {roots && roots.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label className="text-slate-400">Save to</label>
+          <select
+            value={effectiveRootId ?? ""}
+            onChange={(e) => setLibraryRootId(Number(e.target.value))}
+            className="rounded bg-slate-800 px-2 py-1 text-sm"
+          >
+            {roots.map((root) => (
+              <option key={root.id} value={root.id}>
+                {root.name}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-slate-500">→ Soundgasm/&lt;uploader&gt;</span>
+        </div>
+      )}
+
+      <form onSubmit={onQuickImport} className="flex gap-2">
+        <input
+          type="text"
+          placeholder="https://soundgasm.net/u/username/post-title — quick single-track import"
+          value={manualPostUrl}
+          onChange={(e) => setManualPostUrl(e.target.value)}
+          className="flex-1 rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <button
+          type="submit"
+          disabled={resolvePost.isPending || startQuickDownload.isPending || !manualPostUrl || !effectiveRootId}
+          className="rounded bg-slate-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {resolvePost.isPending || startQuickDownload.isPending ? "Importing…" : "Import"}
+        </button>
+      </form>
+      {manualError && <div className="text-sm text-red-400">{manualError}</div>}
+
+      {quickJobs.length > 0 && (
+        <div className="space-y-2">
+          {quickJobs.map((qj) => (
+            <ImportJobPanel
+              key={qj.jobId}
+              jobId={qj.jobId}
+              label={qj.label}
+              onDismiss={() => setQuickJobs((prev) => prev.filter((j) => j.jobId !== qj.jobId))}
+            />
+          ))}
+        </div>
+      )}
+
+      <hr className="border-slate-800" />
+
       <form onSubmit={onList} className="flex gap-2">
         <input
           type="text"
-          placeholder="https://soundgasm.net/u/username"
+          placeholder="https://soundgasm.net/u/username — bulk import from a profile"
           value={profileUrl}
           onChange={(e) => setProfileUrl(e.target.value)}
           className="flex-1 rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -172,25 +333,7 @@ export default function ImportSoundgasm() {
 
       {error && <div className="text-sm text-red-400">{error}</div>}
 
-      <form onSubmit={onAddManualPost} className="flex gap-2">
-        <input
-          type="text"
-          placeholder="https://soundgasm.net/u/username/post-title (for posts missing from the list above)"
-          value={manualPostUrl}
-          onChange={(e) => setManualPostUrl(e.target.value)}
-          className="flex-1 rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        <button
-          type="submit"
-          disabled={resolvePost.isPending || !manualPostUrl}
-          className="rounded bg-slate-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
-        >
-          {resolvePost.isPending ? "Adding…" : "Add post"}
-        </button>
-      </form>
-      {manualError && <div className="text-sm text-red-400">{manualError}</div>}
-
-      {listing && !jobId && (
+      {listing && !bulkJobId && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
             <span>
@@ -237,108 +380,17 @@ export default function ImportSoundgasm() {
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="text-sm text-slate-400">Save to</label>
-            <select
-              value={effectiveRootId ?? ""}
-              onChange={(e) => setLibraryRootId(Number(e.target.value))}
-              className="rounded bg-slate-800 px-2 py-1 text-sm"
-            >
-              {roots?.map((root) => (
-                <option key={root.id} value={root.id}>
-                  {root.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-slate-500">
-              → Soundgasm/{listing.username}
-            </span>
-          </div>
-
           <button
             onClick={onDownload}
-            disabled={selected.size === 0 || !effectiveRootId || startDownload.isPending}
+            disabled={selected.size === 0 || !effectiveRootId || startBulkDownload.isPending}
             className="w-full rounded bg-indigo-600 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {startDownload.isPending ? "Starting…" : `Download ${selected.size} selected`}
+            {startBulkDownload.isPending ? "Starting…" : `Download ${selected.size} selected`}
           </button>
         </div>
       )}
 
-      {job.data && (
-        <div className="space-y-2">
-          {(() => {
-            const failedItems = job.data.items.filter((i) => i.status === "error");
-            const busy = job.data.status === "running" || retry.isPending;
-            return (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
-                  <span>
-                    {job.data.status === "running"
-                      ? "Downloading…"
-                      : job.data.status === "ok"
-                        ? "Done."
-                        : "Job failed."}{" "}
-                    {job.data.items.filter((i) => i.status === "done" || i.status === "skipped").length} /{" "}
-                    {job.data.items.length} processed
-                    {failedItems.length > 0 ? `, ${failedItems.length} failed` : ""}
-                    {" — "}
-                    {folderLink.data ? (
-                      <Link to={`/library/folder/${folderLink.data.folderId}`} className="text-indigo-400 hover:underline">
-                        Soundgasm/{listing?.username}
-                      </Link>
-                    ) : (
-                      <span>Soundgasm/{listing?.username}</span>
-                    )}
-                  </span>
-                  {failedItems.length > 0 && (
-                    <button
-                      onClick={() => retry.mutate(undefined)}
-                      disabled={busy}
-                      className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium disabled:opacity-50"
-                    >
-                      Retry all failed ({failedItems.length})
-                    </button>
-                  )}
-                </div>
-                {playError && <div className="text-xs text-red-400">{playError}</div>}
-                <div className="max-h-96 space-y-1 overflow-y-auto rounded border border-slate-800 p-2 text-sm">
-                  {job.data.items.map((item) => (
-                    <div key={item.postUrl} className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate" title={item.title}>
-                        {item.title}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className={`text-xs ${STATUS_STYLE[item.status]}`} title={item.error}>
-                          {item.status}
-                        </span>
-                        {(item.status === "done" || item.status === "skipped") && (
-                          <button
-                            onClick={() => onPlayItem(item.postUrl)}
-                            disabled={playingUrl === item.postUrl}
-                            className="rounded bg-slate-800 px-2 py-0.5 text-xs disabled:opacity-50"
-                          >
-                            {playingUrl === item.postUrl ? "…" : "▶ Play"}
-                          </button>
-                        )}
-                        {item.status === "error" && (
-                          <button
-                            onClick={() => retry.mutate([item.postUrl])}
-                            disabled={busy}
-                            className="rounded bg-slate-800 px-2 py-0.5 text-xs disabled:opacity-50"
-                          >
-                            Retry
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
+      {bulkJobId && bulkLabel && <ImportJobPanel jobId={bulkJobId} label={bulkLabel} />}
     </div>
   );
 }

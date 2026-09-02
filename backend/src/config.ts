@@ -34,7 +34,23 @@ export const config = {
   coverFilenamePriority: ["cover", "folder", "art"],
 
   ffmpegPath: process.env.FFMPEG_PATH ?? "ffmpeg",
-  wavConversion: {
+
+  transcription: {
+    whisperCliPath: process.env.WHISPER_CLI_PATH ?? "whisper-cli",
+    modelDir: process.env.WHISPER_MODEL_DIR ?? path.resolve("data/whisper-models"),
+    // large-v3-turbo: near-large-v3 accuracy (handles background music/SFX well) at a fraction of
+    // the compute cost. q5_0 quantization trims size/RAM/CPU time with negligible quality loss.
+    modelName: process.env.WHISPER_MODEL_NAME ?? "ggml-large-v3-turbo-q5_0.bin",
+    modelUrl:
+      process.env.WHISPER_MODEL_URL ??
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+    defaultConcurrency: 1,
+    maxConcurrency: 2,
+  },
+
+  audioConversion: {
+    // Lossless formats eligible for the Settings "convert to MP3" batch job.
+    sourceExtensions: [".wav", ".flac"],
     defaultBitrateKbps: 128,
     allowedBitrates: [96, 128, 192],
     defaultConcurrency: 2,

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { files, folders, libraryRoots } from "../db/schema.js";
 import { config } from "../config.js";
@@ -8,12 +8,13 @@ import { startConversion, getConversionStatus, cancelConversion } from "../conve
 export default async function convertRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", fastify.requireAuth);
 
-  fastify.get("/convert/wav-files", async (_request, reply) => {
+  fastify.get("/convert/convertible-files", async (_request, reply) => {
     const rows = db
       .select({
         id: files.id,
         relativePath: files.relativePath,
         filename: files.filename,
+        extension: files.extension,
         sizeBytes: files.sizeBytes,
         folderId: files.folderId,
         folderName: folders.name,
@@ -23,7 +24,7 @@ export default async function convertRoutes(fastify: FastifyInstance) {
       .from(files)
       .innerJoin(folders, eq(folders.id, files.folderId))
       .innerJoin(libraryRoots, eq(libraryRoots.id, files.libraryRootId))
-      .where(and(eq(files.extension, ".wav"), isNull(files.deletedAt)))
+      .where(and(inArray(files.extension, config.audioConversion.sourceExtensions), isNull(files.deletedAt)))
       .orderBy(files.relativePath)
       .all();
 
@@ -42,29 +43,29 @@ export default async function convertRoutes(fastify: FastifyInstance) {
 
       const {
         fileIds,
-        bitrateKbps = config.wavConversion.defaultBitrateKbps,
-        concurrency = config.wavConversion.defaultConcurrency,
+        bitrateKbps = config.audioConversion.defaultBitrateKbps,
+        concurrency = config.audioConversion.defaultConcurrency,
       } = request.body ?? {};
 
-      if (!config.wavConversion.allowedBitrates.includes(bitrateKbps)) {
+      if (!config.audioConversion.allowedBitrates.includes(bitrateKbps)) {
         reply
           .code(400)
-          .send({ error: `bitrateKbps must be one of ${config.wavConversion.allowedBitrates.join(", ")}` });
+          .send({ error: `bitrateKbps must be one of ${config.audioConversion.allowedBitrates.join(", ")}` });
         return;
       }
-      const clampedConcurrency = Math.max(1, Math.min(concurrency, config.wavConversion.maxConcurrency));
+      const clampedConcurrency = Math.max(1, Math.min(concurrency, config.audioConversion.maxConcurrency));
 
       let targetIds = fileIds;
       if (!targetIds || targetIds.length === 0) {
         targetIds = db
           .select({ id: files.id })
           .from(files)
-          .where(and(eq(files.extension, ".wav"), isNull(files.deletedAt)))
+          .where(and(inArray(files.extension, config.audioConversion.sourceExtensions), isNull(files.deletedAt)))
           .all()
           .map((r) => r.id);
       }
       if (targetIds.length === 0) {
-        reply.code(400).send({ error: "no WAV files to convert" });
+        reply.code(400).send({ error: "no convertible files found" });
         return;
       }
 

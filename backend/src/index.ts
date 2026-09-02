@@ -17,11 +17,16 @@ import playbackRoutes from "./routes/playback.js";
 import scrapeRoutes from "./routes/scrape.js";
 import historyRoutes from "./routes/history.js";
 import convertRoutes from "./routes/convert.js";
+import transcribeRoutes from "./routes/transcribe.js";
+import tagsRoutes from "./routes/tags.js";
+import syncRoutes from "./routes/sync.js";
 import { scanAllEnabledRoots } from "./scanner/scanManager.js";
 
 const fastify = Fastify({
   logger: true,
   trustProxy: config.trustProxy,
+  // Default is 1MiB, far too small for a synced audiobook file (/sync/upload).
+  bodyLimit: 5 * 1024 * 1024 * 1024,
 });
 
 await fastify.register(cookie);
@@ -41,6 +46,9 @@ await fastify.register(playbackRoutes, { prefix: "/api" });
 await fastify.register(scrapeRoutes, { prefix: "/api" });
 await fastify.register(historyRoutes, { prefix: "/api" });
 await fastify.register(convertRoutes, { prefix: "/api" });
+await fastify.register(transcribeRoutes, { prefix: "/api" });
+await fastify.register(tagsRoutes, { prefix: "/api" });
+await fastify.register(syncRoutes, { prefix: "/api" });
 
 // Serves the built frontend (frontend/dist copied here at Docker build time) with SPA fallback.
 if (fs.existsSync(config.publicDir)) {

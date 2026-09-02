@@ -11,8 +11,21 @@ import {
   useRatedFolders,
   useDeleteRatedFolders,
 } from "../api/hooks/library";
-import { useWavFiles, useStartConversion, useConversionStatus, useCancelConversion } from "../api/hooks/convert";
+import {
+  useConvertibleFiles,
+  useStartConversion,
+  useConversionStatus,
+  useCancelConversion,
+} from "../api/hooks/convert";
 import { useLogout } from "../api/hooks/auth";
+import {
+  useSyncConfig,
+  useSaveSyncConfig,
+  useSaveIngestConfig,
+  useRegenerateIngestKey,
+  useTriggerSync,
+  useSyncStatus,
+} from "../api/hooks/sync";
 import type { LibraryRoot } from "../api/types";
 
 const BITRATE_OPTIONS = [96, 128, 192];
@@ -175,7 +188,7 @@ function CleanupSection() {
 
 function ConvertSection() {
   const queryClient = useQueryClient();
-  const { data: wavFiles } = useWavFiles();
+  const { data: sourceFiles } = useConvertibleFiles();
   const [bitrateKbps, setBitrateKbps] = useState(128);
   const [concurrency, setConcurrency] = useState(2);
   // Always fetched (cheap, single global endpoint) so a page refresh mid-batch still shows
@@ -188,7 +201,7 @@ function ConvertSection() {
 
   useEffect(() => {
     if (status && (status.status === "done" || status.status === "cancelled")) {
-      queryClient.invalidateQueries({ queryKey: ["wav-files"] });
+      queryClient.invalidateQueries({ queryKey: ["convertible-files"] });
       queryClient.invalidateQueries({ queryKey: ["folder"] });
       queryClient.invalidateQueries({ queryKey: ["root-folder"] });
       queryClient.invalidateQueries({ queryKey: ["search"] });
@@ -196,10 +209,10 @@ function ConvertSection() {
   }, [status?.status, queryClient]);
 
   async function onConvertAll() {
-    if (!wavFiles || wavFiles.count === 0) return;
+    if (!sourceFiles || sourceFiles.count === 0) return;
     if (
       !confirm(
-        `Convert ${wavFiles.count} WAV file${wavFiles.count === 1 ? "" : "s"} (${formatBytes(wavFiles.totalBytes)}) to MP3 at ${bitrateKbps}kbps?\n\nEach original WAV is deleted only after its MP3 is verified — ratings, play history, and playback position carry over.`
+        `Convert ${sourceFiles.count} file${sourceFiles.count === 1 ? "" : "s"} (${formatBytes(sourceFiles.totalBytes)}) to MP3 at ${bitrateKbps}kbps?\n\nEach original is deleted only after its MP3 is verified — ratings, play history, and playback position carry over.`
       )
     ) {
       return;
@@ -214,16 +227,24 @@ function ConvertSection() {
     .filter((f) => f.status === "done" && f.sizeBytesAfter !== undefined)
     .reduce((sum, f) => sum + (f.sizeBytesBefore - (f.sizeBytesAfter ?? 0)), 0);
 
+  const extensionCounts = new Map<string, number>();
+  for (const f of sourceFiles?.files ?? []) {
+    extensionCounts.set(f.extension, (extensionCounts.get(f.extension) ?? 0) + 1);
+  }
+  const breakdown = [...extensionCounts.entries()]
+    .map(([ext, n]) => `${n} ${ext.slice(1).toUpperCase()}`)
+    .join(", ");
+
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-medium text-slate-400">Convert WAV to MP3</h2>
+      <h2 className="text-sm font-medium text-slate-400">Convert to MP3</h2>
       <div className="space-y-3 rounded-lg border border-slate-800 p-4">
         <div className="text-sm">
-          {wavFiles === undefined
+          {sourceFiles === undefined
             ? "Checking library…"
-            : wavFiles.count === 0
-              ? "No WAV files found."
-              : `${wavFiles.count} WAV file${wavFiles.count === 1 ? "" : "s"} found, totaling ${formatBytes(wavFiles.totalBytes)}.`}
+            : sourceFiles.count === 0
+              ? "No WAV or FLAC files found."
+              : `${breakdown} file${sourceFiles.count === 1 ? "" : "s"} found, totaling ${formatBytes(sourceFiles.totalBytes)}.`}
         </div>
 
         <div className="flex flex-wrap gap-4">
@@ -262,10 +283,10 @@ function ConvertSection() {
         <div className="flex gap-2">
           <button
             onClick={onConvertAll}
-            disabled={!wavFiles || wavFiles.count === 0 || isActive}
+            disabled={!sourceFiles || sourceFiles.count === 0 || isActive}
             className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
           >
-            {isActive ? "Converting…" : `Convert all${wavFiles?.count ? ` (${wavFiles.count})` : ""}`}
+            {isActive ? "Converting…" : `Convert all${sourceFiles?.count ? ` (${sourceFiles.count})` : ""}`}
           </button>
           {isActive && (
             <button
@@ -298,6 +319,179 @@ function ConvertSection() {
             )}
           </div>
         )}
+      </div>
+    </section>
+  );
+}
+
+function SyncSection() {
+  const { data: roots } = useLibraryRoots();
+  const { data: cfg } = useSyncConfig();
+  const saveConfig = useSaveSyncConfig();
+  const saveIngestConfig = useSaveIngestConfig();
+  const regenerateKey = useRegenerateIngestKey();
+  const triggerSync = useTriggerSync();
+  const { data: status } = useSyncStatus(true);
+
+  const [remoteBaseUrl, setRemoteBaseUrl] = useState("");
+  const [remoteApiKey, setRemoteApiKey] = useState("");
+  const [minRating, setMinRating] = useState(4);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cfg) {
+      setRemoteBaseUrl(cfg.remoteBaseUrl ?? "");
+      setMinRating(cfg.minRating);
+    }
+  }, [cfg]);
+
+  async function onSavePushConfig(e: React.FormEvent) {
+    e.preventDefault();
+    setSaveMsg(null);
+    try {
+      await saveConfig.mutateAsync({ remoteBaseUrl, ...(remoteApiKey ? { remoteApiKey } : {}), minRating });
+      setRemoteApiKey("");
+      setSaveMsg("Saved.");
+    } catch (err) {
+      setSaveMsg(err instanceof Error ? err.message : "Failed to save");
+    }
+  }
+
+  async function onSyncNow() {
+    setSyncError(null);
+    try {
+      await triggerSync.mutateAsync();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Failed to start sync");
+    }
+  }
+
+  const isRunning = status?.status === "running";
+  const entries = status?.entries ?? [];
+  const doneCount = entries.filter((e) => e.status === "done").length;
+  const errorEntries = entries.filter((e) => e.status === "error");
+  const canSync = !!cfg?.remoteBaseUrl && cfg.remoteApiKeySet;
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium text-slate-400">Cloud sync</h2>
+
+      <div className="space-y-3 rounded-lg border border-slate-800 p-4">
+        <div className="text-sm font-medium">Push to a cloud instance</div>
+        <form onSubmit={onSavePushConfig} className="space-y-2">
+          <input
+            type="text"
+            placeholder="https://audiohub.yourdomain.com"
+            value={remoteBaseUrl}
+            onChange={(e) => setRemoteBaseUrl(e.target.value)}
+            className="w-full rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <input
+            type="password"
+            placeholder={cfg?.remoteApiKeySet ? "API key set — leave blank to keep it" : "API key from the cloud instance"}
+            value={remoteApiKey}
+            onChange={(e) => setRemoteApiKey(e.target.value)}
+            className="w-full rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            Minimum rating to sync
+            <select
+              value={minRating}
+              onChange={(e) => setMinRating(Number(e.target.value))}
+              className="rounded bg-slate-800 px-2 py-1 text-sm text-slate-200"
+            >
+              <option value={4}>4+ stars</option>
+              <option value={5}>5 stars only</option>
+            </select>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={saveConfig.isPending}
+              className="rounded bg-slate-700 px-3 py-1 text-sm disabled:opacity-50"
+            >
+              {saveConfig.isPending ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={onSyncNow}
+              disabled={!canSync || isRunning}
+              className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
+              title={canSync ? undefined : "Set a URL and API key first"}
+            >
+              {isRunning ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+          {saveMsg && <div className="text-xs text-slate-400">{saveMsg}</div>}
+          {syncError && <div className="text-xs text-red-400">{syncError}</div>}
+        </form>
+
+        {status && status.status !== "idle" && (
+          <div className="space-y-1">
+            <div className="text-xs text-slate-500">
+              {entries.length === 0 && status.status === "done"
+                ? "Already up to date — nothing to push."
+                : `${doneCount}/${entries.length} processed${errorEntries.length > 0 ? `, ${errorEntries.length} failed` : ""}`}
+            </div>
+            {errorEntries.length > 0 && (
+              <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs text-red-400">
+                {errorEntries.map((e) => (
+                  <li key={`${e.fileId}-${e.action}`} className="truncate" title={e.error}>
+                    {e.action === "delete" ? "remove " : ""}
+                    {e.relativePath}: {e.error}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-slate-800 p-4">
+        <div className="text-sm font-medium">Accept pushes from a local instance</div>
+        <label className="flex flex-col gap-1 text-xs text-slate-400">
+          Destination library folder
+          <select
+            value={cfg?.ingestLibraryRootId ?? ""}
+            onChange={(e) =>
+              saveIngestConfig.mutate({ ingestLibraryRootId: e.target.value ? Number(e.target.value) : null })
+            }
+            className="rounded bg-slate-800 px-2 py-1 text-sm text-slate-200"
+          >
+            <option value="">Not configured</option>
+            {roots?.map((root) => (
+              <option key={root.id} value={root.id}>
+                {root.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="space-y-1">
+          <div className="text-xs text-slate-400">
+            Ingest API key{cfg?.ingestApiKey ? "" : " — none generated yet"}
+          </div>
+          {cfg?.ingestApiKey && (
+            <code className="block break-all rounded bg-slate-950 p-2 text-xs text-slate-300">
+              {cfg.ingestApiKey}
+            </code>
+          )}
+          <button
+            onClick={() => {
+              if (!cfg?.ingestApiKey || confirm("Generate a new key? The old one stops working immediately.")) {
+                regenerateKey.mutate();
+              }
+            }}
+            disabled={regenerateKey.isPending}
+            className="rounded bg-slate-700 px-3 py-1 text-sm disabled:opacity-50"
+          >
+            {cfg?.ingestApiKey ? "Regenerate key" : "Generate key"}
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">
+          Enter this server's address and the key above into the "Push to a cloud instance" section
+          on the other AudioHub instance.
+        </p>
       </div>
     </section>
   );
@@ -375,6 +569,7 @@ export default function Settings() {
       </section>
 
       <ConvertSection />
+      <SyncSection />
       <CleanupSection />
     </div>
   );

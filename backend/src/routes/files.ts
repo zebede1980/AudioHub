@@ -3,10 +3,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { files, folders, libraryRoots, ratings } from "../db/schema.js";
+import { files, folders, libraryRoots, ratings, transcripts } from "../db/schema.js";
 import { streamFileWithRangeSupport, mimeTypeForExtension, imageMimeTypeForExtension } from "../streaming/rangeStream.js";
 import { resolveCoverAbsolutePath } from "../scanner/coverCache.js";
 import { startScan } from "../scanner/scanManager.js";
+import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
+import { tagsByFileId } from "../db/tagLookup.js";
 
 async function loadFileWithRoot(id: number) {
   const file = db.select().from(files).where(eq(files.id, id)).get();
@@ -26,18 +28,57 @@ export default async function filesRoutes(fastify: FastifyInstance) {
         folderId: files.folderId,
         folderName: folders.name,
         title: files.title,
+        trackNumber: files.trackNumber,
         filename: files.filename,
         durationSec: files.durationSec,
         coverImagePath: files.coverImagePath,
         rating: ratings.rating,
         ratedAt: ratings.ratedAt,
+        hasTranscript: transcripts.id,
       })
       .from(ratings)
       .innerJoin(files, and(eq(files.id, ratings.fileId), isNull(files.deletedAt)))
       .innerJoin(folders, eq(folders.id, files.folderId))
+      .leftJoin(transcripts, eq(transcripts.fileId, files.id))
       .orderBy(desc(ratings.rating), desc(ratings.ratedAt))
-      .all();
-    reply.send(rows);
+      .all()
+      .map((r) => ({ ...r, hasTranscript: r.hasTranscript !== null }));
+
+    const tagsByFile = tagsByFileId(rows.map((r) => r.id));
+    reply.send(rows.map((r) => ({ ...r, tags: tagsByFile.get(r.id) ?? [] })));
+  });
+
+  // Newest-first by when the scanner first indexed a file, so freshly imported/scanned content
+  // (a new soundgasm import, files dropped onto the library drive) surfaces without hunting
+  // through folders for it.
+  fastify.get<{ Querystring: { limit?: string } }>("/files/recent", async (request, reply) => {
+    const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50));
+    const rows = db
+      .select({
+        id: files.id,
+        folderId: files.folderId,
+        folderName: folders.name,
+        title: files.title,
+        trackNumber: files.trackNumber,
+        filename: files.filename,
+        durationSec: files.durationSec,
+        coverImagePath: files.coverImagePath,
+        rating: ratings.rating,
+        firstSeenAt: files.firstSeenAt,
+        hasTranscript: transcripts.id,
+      })
+      .from(files)
+      .innerJoin(folders, eq(folders.id, files.folderId))
+      .leftJoin(ratings, eq(ratings.fileId, files.id))
+      .leftJoin(transcripts, eq(transcripts.fileId, files.id))
+      .where(isNull(files.deletedAt))
+      .orderBy(desc(files.firstSeenAt))
+      .limit(limit)
+      .all()
+      .map((r) => ({ ...r, hasTranscript: r.hasTranscript !== null }));
+
+    const tagsByFile = tagsByFileId(rows.map((r) => r.id));
+    reply.send(rows.map((r) => ({ ...r, tags: tagsByFile.get(r.id) ?? [] })));
   });
 
   // Permanently deletes every file at a given star rating from disk (e.g. "clean out my 1-stars").
@@ -71,6 +112,7 @@ export default async function filesRoutes(fastify: FastifyInstance) {
         fs.rmSync(absPath, { force: true });
         deletedCount++;
         touchedRoots.set(row.libraryRootId, row.containerPath);
+        pruneEmptyAncestorDirs(path.dirname(absPath), row.containerPath);
       } catch (err) {
         fastify.log.error({ err, absPath }, "failed to delete rated file");
       }

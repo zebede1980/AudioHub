@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { WavFilesResponse, ConversionStatus } from "../types";
+import type { ConvertibleFilesResponse, ConversionStatus } from "../types";
 
-export function useWavFiles() {
-  return useQuery<WavFilesResponse>({
-    queryKey: ["wav-files"],
-    queryFn: () => api.get("/convert/wav-files"),
+export function useConvertibleFiles() {
+  return useQuery<ConvertibleFilesResponse>({
+    queryKey: ["convertible-files"],
+    queryFn: () => api.get("/convert/convertible-files"),
   });
 }
 

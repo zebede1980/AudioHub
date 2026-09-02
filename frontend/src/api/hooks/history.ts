@@ -1,16 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import type { FileTagSummary } from "../types";
 
 export interface PlayHistoryEntry {
   historyId: number;
   playedAt: number;
   fileId: number;
   title: string | null;
+  trackNumber: number | null;
   filename: string;
   durationSec: number | null;
   coverImagePath: string | null;
   folderId: number;
   folderName: string;
+  rating: number | null;
+  hasTranscript: boolean;
+  tags: FileTagSummary[];
 }
 
 export function usePlayHistory() {

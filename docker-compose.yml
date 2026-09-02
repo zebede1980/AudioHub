@@ -24,6 +24,9 @@ services:
       NODE_ENV: production
       DATABASE_PATH: /data/audiohub.db
       COVER_CACHE_DIR: /data/cache/covers
+      # Persisted in the /data volume so the ~550MB whisper model survives container recreation
+      # instead of re-downloading on every redeploy.
+      WHISPER_MODEL_DIR: /data/whisper-models
       SESSION_SECRET: ${SESSION_SECRET}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}

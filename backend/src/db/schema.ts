@@ -135,4 +135,71 @@ export const playbackSession = sqliteTable("playback_session", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+export const transcripts = sqliteTable("transcripts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fileId: integer("file_id").notNull().unique().references(() => files.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  language: text("language"),
+  model: text("model").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const tags = sqliteTable("tags", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const fileTags = sqliteTable(
+  "file_tags",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fileId: integer("file_id").notNull().references(() => files.id, { onDelete: "cascade" }),
+    tagId: integer("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    uniqFileTag: uniqueIndex("idx_file_tags_file_tag").on(t.fileId, t.tagId),
+    tagIdx: index("idx_file_tags_tag").on(t.tagId),
+  })
+);
+
+// Single-row config (id fixed at 1), same as playbackSession. Holds both roles this instance can
+// play: pushing this library's top-rated files out to a remote AudioHub, and/or accepting pushes
+// from a remote AudioHub into a local library root. Either, both, or neither can be configured.
+export const syncConfig = sqliteTable("sync_config", {
+  id: integer("id").primaryKey().default(1),
+  // Outgoing (this instance pushes to another AudioHub).
+  remoteBaseUrl: text("remote_base_url"),
+  remoteApiKey: text("remote_api_key"),
+  minRating: integer("min_rating").notNull().default(4),
+  // Incoming (this instance accepts pushes from another AudioHub).
+  ingestApiKey: text("ingest_api_key"),
+  ingestLibraryRootId: integer("ingest_library_root_id").references(() => libraryRoots.id, { onDelete: "set null" }),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// Local bookkeeping for files this instance has pushed to its configured remote. Deliberately not
+// cascaded off files.id (SET NULL instead) — if the source file is deleted locally, we still need
+// this row to know a remote copy exists and should be cleaned up on the next sync run.
+export const syncedFiles = sqliteTable("synced_files", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fileId: integer("file_id").references(() => files.id, { onDelete: "set null" }),
+  contentHash: text("content_hash").notNull().unique(),
+  relativePath: text("relative_path").notNull(),
+  status: text("status").notNull(), // 'synced' | 'error'
+  lastError: text("last_error"),
+  syncedAt: integer("synced_at").notNull(),
+});
+
+// Cloud-side receipt of a file accepted via /sync/upload, keyed by the pusher's content hash so a
+// re-push of identical content (or a manifest check) is idempotent without needing to track the
+// pusher's own file ids.
+export const syncReceipts = sqliteTable("sync_receipts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  contentHash: text("content_hash").notNull().unique(),
+  libraryRootId: integer("library_root_id").notNull().references(() => libraryRoots.id, { onDelete: "cascade" }),
+  relativePath: text("relative_path").notNull(),
+  receivedAt: integer("received_at").notNull(),
+});
+
 export const sqlNow = sql`(unixepoch() * 1000)`;

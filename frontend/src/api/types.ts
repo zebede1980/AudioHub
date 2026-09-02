@@ -38,6 +38,32 @@ export interface FileRow {
   durationSec: number | null;
   coverImagePath: string | null;
   rating: number | null;
+  hasTranscript: boolean;
+  tags: FileTagSummary[];
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  createdAt: number;
+  trackCount?: number;
+}
+
+export interface FileTagSummary {
+  id: number;
+  name: string;
+}
+
+export interface TaggedTrack {
+  id: number;
+  folderId: number;
+  title: string | null;
+  filename: string;
+  trackNumber: number | null;
+  durationSec: number | null;
+  coverImagePath: string | null;
+  rating: number | null;
+  hasTranscript: boolean;
 }
 
 export interface FolderDetail {
@@ -82,11 +108,29 @@ export interface RatedFile {
   folderId: number;
   folderName: string;
   title: string | null;
+  trackNumber: number | null;
   filename: string;
   durationSec: number | null;
   coverImagePath: string | null;
   rating: number;
   ratedAt: number;
+  hasTranscript: boolean;
+  tags: FileTagSummary[];
+}
+
+export interface RecentFile {
+  id: number;
+  folderId: number;
+  folderName: string;
+  title: string | null;
+  trackNumber: number | null;
+  filename: string;
+  durationSec: number | null;
+  coverImagePath: string | null;
+  rating: number | null;
+  firstSeenAt: number;
+  hasTranscript: boolean;
+  tags: FileTagSummary[];
 }
 
 export interface SearchResultRow {
@@ -99,6 +143,7 @@ export interface SearchResultRow {
   duration_sec: number | null;
   cover_image_path: string | null;
   rating: number | null;
+  tags: FileTagSummary[];
 }
 
 export interface FolderSearchResult {
@@ -110,10 +155,11 @@ export interface FolderSearchResult {
   rating: number | null;
 }
 
-export interface WavFile {
+export interface ConvertibleFile {
   id: number;
   relativePath: string;
   filename: string;
+  extension: string;
   sizeBytes: number;
   folderId: number;
   folderName: string;
@@ -121,8 +167,8 @@ export interface WavFile {
   libraryRootName: string;
 }
 
-export interface WavFilesResponse {
-  files: WavFile[];
+export interface ConvertibleFilesResponse {
+  files: ConvertibleFile[];
   count: number;
   totalBytes: number;
 }
@@ -145,4 +191,31 @@ export interface ConversionStatus {
   files?: FileConversionState[];
   startedAt?: number;
   finishedAt?: number;
+}
+
+export interface Transcript {
+  id: number;
+  fileId: number;
+  text: string;
+  language: string | null;
+  model: string;
+  createdAt: number;
+}
+
+export type FileTranscriptionStatus = "queued" | "transcribing" | "done" | "error" | "skipped";
+
+export interface FileTranscriptionState {
+  fileId: number;
+  relativePath: string;
+  status: FileTranscriptionStatus;
+  wordCount?: number;
+  error?: string;
+}
+
+export interface TranscriptionStatus {
+  status: "idle" | "downloading-model" | "running" | "cancelling" | "done" | "cancelled" | "error";
+  files?: FileTranscriptionState[];
+  startedAt?: number;
+  finishedAt?: number;
+  error?: string;
 }

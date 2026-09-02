@@ -1,13 +1,62 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useFolder } from "../api/hooks/folder";
 import { useSetRating, useSetFolderRating } from "../api/hooks/ratings";
+import { useTranscribeFolder, useTranscriptionStatus, useCancelTranscription } from "../api/hooks/transcribe";
 import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
 import FolderGrid from "../components/FolderGrid";
 import FileRow from "../components/FileRow";
 import RatingStars from "../components/RatingStars";
+import TranscriptModal from "../components/TranscriptModal";
+import TagEditor from "../components/TagEditor";
 import type { FileDetail } from "../api/types";
+
+function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; fileIds: number[] }) {
+  const queryClient = useQueryClient();
+  const transcribeFolder = useTranscribeFolder();
+  const cancelTranscription = useCancelTranscription();
+  const { data: status } = useTranscriptionStatus(true);
+
+  const isActive = status?.status === "running" || status?.status === "downloading-model" || status?.status === "cancelling";
+  const relevant = status?.files?.filter((f) => fileIds.includes(f.fileId)) ?? [];
+  const isThisFolderActive = isActive && relevant.length > 0;
+
+  useEffect(() => {
+    if (status && (status.status === "done" || status.status === "cancelled") && relevant.length > 0) {
+      queryClient.invalidateQueries({ queryKey: ["folder"] });
+    }
+  }, [status?.status]);
+
+  const doneCount = relevant.filter((f) => f.status === "done").length;
+  const errorCount = relevant.filter((f) => f.status === "error").length;
+
+  if (isThisFolderActive) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <span>
+          {status?.status === "downloading-model"
+            ? "Downloading model…"
+            : `Transcribing… ${doneCount}/${relevant.length}${errorCount ? `, ${errorCount} failed` : ""}`}
+        </span>
+        <button onClick={() => cancelTranscription.mutate()} className="underline hover:text-red-400">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => transcribeFolder.mutate(folderId)}
+      disabled={isActive || transcribeFolder.isPending}
+      className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
+    >
+      Transcribe folder
+    </button>
+  );
+}
 
 export default function FolderBrowser() {
   const { folderId } = useParams<{ folderId: string }>();
@@ -20,6 +69,8 @@ export default function FolderBrowser() {
   const setFolderRating = useSetFolderRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
+  const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
+  const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
 
   async function playFile(fileId: number) {
     const file = await api.get<FileDetail>(`/files/${fileId}`);
@@ -75,23 +126,26 @@ export default function FolderBrowser() {
 
       {files.length > 0 && (
         <div>
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-sm font-medium text-slate-400">
               {folder.fileCount} file{folder.fileCount === 1 ? "" : "s"}
             </h2>
-            <select
-              value={sort}
-              onChange={(e) => {
-                setSort(e.target.value);
-                setPage(1);
-              }}
-              className="rounded bg-slate-800 px-2 py-1 text-xs"
-            >
-              <option value="track">Track order</option>
-              <option value="title">Title</option>
-              <option value="duration">Duration</option>
-              <option value="rating">Rating</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <TranscribeFolderControl folderId={folder.id} fileIds={files.map((f) => f.id)} />
+              <select
+                value={sort}
+                onChange={(e) => {
+                  setSort(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded bg-slate-800 px-2 py-1 text-xs"
+              >
+                <option value="track">Track order</option>
+                <option value="title">Title</option>
+                <option value="duration">Duration</option>
+                <option value="rating">Rating</option>
+              </select>
+            </div>
           </div>
           <div className="space-y-1">
             {files.map((file) => (
@@ -101,6 +155,8 @@ export default function FolderBrowser() {
                 isCurrent={currentFile?.id === file.id}
                 onPlay={() => playFile(file.id)}
                 onRate={(rating) => setRating.mutate({ fileId: file.id, rating })}
+                onViewTranscript={() => setViewingTranscriptFileId(file.id)}
+                onEditTags={() => setEditingTagsFileId(file.id)}
               />
             ))}
           </div>
@@ -128,6 +184,13 @@ export default function FolderBrowser() {
 
       {subfolders.length === 0 && files.length === 0 && (
         <div className="p-6 text-center text-slate-500">This folder is empty.</div>
+      )}
+
+      {viewingTranscriptFileId !== null && (
+        <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
+      )}
+      {editingTagsFileId !== null && (
+        <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
       )}
     </div>
   );

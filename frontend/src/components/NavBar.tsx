@@ -28,6 +28,9 @@ export default function NavBar() {
         <NavLink to="/search" className={linkClass}>
           Search
         </NavLink>
+        <NavLink to="/tags" className={linkClass}>
+          Tags
+        </NavLink>
         <NavLink to="/history" className={linkClass}>
           History
         </NavLink>
