@@ -25,6 +25,14 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        # Lets the (amd64) GitHub runner emulate arm64 to cross-build for it below — needed for
+        # arm64 cloud boxes (e.g. Oracle Cloud's Ampere instances) to be able to `docker compose
+        # pull` instead of building from source.
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -50,6 +58,10 @@ jobs:
         with:
           context: .
           file: backend/Dockerfile
+          # arm64 builds under QEMU emulation — noticeably slower than the native amd64 build
+          # (whisper.cpp's C++ build is the biggest chunk of it), but this only runs on push
+          # to main/tags, not on every commit.
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
