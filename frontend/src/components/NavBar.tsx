@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { playTestSound } from "../utils/testSound";
+import SyncButton from "./SyncButton";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1 text-sm rounded ${isActive ? "bg-slate-800 text-white" : "text-slate-400"}`;
@@ -53,6 +54,8 @@ export default function NavBar() {
           className="w-full min-w-0 max-w-xs rounded bg-slate-800 px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
         />
       </form>
+
+      <SyncButton />
 
       <button
         onClick={playTestSound}
