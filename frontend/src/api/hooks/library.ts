@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../client";
-import type { LibraryRoot, ScanStatus, FolderSummary, RatedFile, RatedFolder, RecentFile } from "../types";
+import type { LibraryRoot, ScanStatus, FolderSummary, RatedFile, RatedFolder, RecentFile, RandomFile } from "../types";
 
 export function useLibraryRoots() {
   return useQuery<LibraryRoot[]>({
@@ -75,6 +75,21 @@ export function useRecentFiles() {
   return useQuery<RecentFile[]>({
     queryKey: ["recent-files"],
     queryFn: () => api.get("/files/recent"),
+  });
+}
+
+// Exported so consumers can patch this exact cache entry (e.g. a rating just set from the list)
+// without invalidating it — invalidating would trigger a refetch, and since this query is
+// non-deterministic (ORDER BY RANDOM() server-side), that would reshuffle the batch the user is
+// currently looking at instead of just updating one row's rating in place.
+export function randomFilesQueryKey(limit: number, includeRated: boolean): QueryKey {
+  return ["random-files", limit, includeRated];
+}
+
+export function useRandomFiles(limit: number, includeRated: boolean) {
+  return useQuery<RandomFile[]>({
+    queryKey: randomFilesQueryKey(limit, includeRated),
+    queryFn: () => api.get(`/files/random?limit=${limit}&includeRated=${includeRated}`),
   });
 }
 

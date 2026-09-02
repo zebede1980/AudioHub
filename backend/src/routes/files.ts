@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import path from "node:path";
 import fs from "node:fs";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { files, folders, libraryRoots, ratings, transcripts } from "../db/schema.js";
 import { streamFileWithRangeSupport, mimeTypeForExtension, imageMimeTypeForExtension } from "../streaming/rangeStream.js";
@@ -73,6 +73,40 @@ export default async function filesRoutes(fastify: FastifyInstance) {
       .leftJoin(transcripts, eq(transcripts.fileId, files.id))
       .where(isNull(files.deletedAt))
       .orderBy(desc(files.firstSeenAt))
+      .limit(limit)
+      .all()
+      .map((r) => ({ ...r, hasTranscript: r.hasTranscript !== null }));
+
+    const tagsByFile = tagsByFileId(rows.map((r) => r.id));
+    reply.send(rows.map((r) => ({ ...r, tags: tagsByFile.get(r.id) ?? [] })));
+  });
+
+  // For discovering something to tag/rate rather than looking for something specific — a fresh
+  // ORDER BY RANDOM() draw every call (not paginated/cached server-side), so "another batch" is
+  // just calling this again.
+  fastify.get<{ Querystring: { limit?: string; includeRated?: string } }>("/files/random", async (request, reply) => {
+    const limit = Math.min(50, Math.max(1, Number(request.query.limit) || 10));
+    const includeRated = request.query.includeRated === "true";
+
+    const rows = db
+      .select({
+        id: files.id,
+        folderId: files.folderId,
+        folderName: folders.name,
+        title: files.title,
+        trackNumber: files.trackNumber,
+        filename: files.filename,
+        durationSec: files.durationSec,
+        coverImagePath: files.coverImagePath,
+        rating: ratings.rating,
+        hasTranscript: transcripts.id,
+      })
+      .from(files)
+      .innerJoin(folders, eq(folders.id, files.folderId))
+      .leftJoin(ratings, eq(ratings.fileId, files.id))
+      .leftJoin(transcripts, eq(transcripts.fileId, files.id))
+      .where(includeRated ? isNull(files.deletedAt) : and(isNull(files.deletedAt), isNull(ratings.rating)))
+      .orderBy(sql`RANDOM()`)
       .limit(limit)
       .all()
       .map((r) => ({ ...r, hasTranscript: r.hasTranscript !== null }));

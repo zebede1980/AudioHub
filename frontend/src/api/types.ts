@@ -134,6 +134,20 @@ export interface RecentFile {
   tags: FileTagSummary[];
 }
 
+export interface RandomFile {
+  id: number;
+  folderId: number;
+  folderName: string;
+  title: string | null;
+  trackNumber: number | null;
+  filename: string;
+  durationSec: number | null;
+  coverImagePath: string | null;
+  rating: number | null;
+  hasTranscript: boolean;
+  tags: FileTagSummary[];
+}
+
 export interface SearchResultRow {
   id: number;
   folderId: number;
