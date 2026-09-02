@@ -1,11 +1,13 @@
 interface Props {
   value: number | null;
   onChange?: (rating: number) => void;
+  /** Clicking the already-selected star clears the rating instead of re-setting it, when provided. */
+  onClear?: () => void;
   size?: "sm" | "lg";
   readOnly?: boolean;
 }
 
-export default function RatingStars({ value, onChange, size = "lg", readOnly = false }: Props) {
+export default function RatingStars({ value, onChange, onClear, size = "lg", readOnly = false }: Props) {
   const textSize = size === "lg" ? "text-2xl" : "text-base";
 
   if (readOnly) {
@@ -29,10 +31,12 @@ export default function RatingStars({ value, onChange, size = "lg", readOnly = f
           type="button"
           role="radio"
           aria-checked={value === star}
+          title={value === star && onClear ? "Click to clear rating" : undefined}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onChange?.(star);
+            if (value === star && onClear) onClear();
+            else onChange?.(star);
           }}
           className={`${textSize} leading-none ${value && star <= value ? "text-yellow-400" : "text-slate-600"}`}
         >

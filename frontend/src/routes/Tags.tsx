@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTags, useDeleteTag, useTracksByTags } from "../api/hooks/tags";
-import { api, fileCoverUrl } from "../api/client";
+import { useSetRating, useClearRating } from "../api/hooks/ratings";
+import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
-import RatingStars from "../components/RatingStars";
-import type { FileDetail } from "../api/types";
+import FileRow from "../components/FileRow";
+import TagEditor from "../components/TagEditor";
+import TranscriptModal from "../components/TranscriptModal";
+import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
 export default function Tags() {
   const { data: tags, isLoading } = useTags();
@@ -13,6 +16,11 @@ export default function Tags() {
   const [mode, setMode] = useState<"all" | "any">("all");
   const { data, isLoading: tracksLoading } = useTracksByTags(selectedIds, mode);
   const play = usePlayerStore((s) => s.play);
+  const currentFile = usePlayerStore((s) => s.currentFile);
+  const setRating = useSetRating();
+  const clearRating = useClearRating();
+  const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
+  const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
   function toggleTag(id: number) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -87,39 +95,51 @@ export default function Tags() {
       ) : (
         <div className="space-y-1">
           {tracksLoading && <div className="text-slate-400">Loading tracks…</div>}
-          {data?.files.map((file) => (
-            <div
-              key={file.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => playFile(file.id)}
-              onKeyDown={(e) => e.key === "Enter" && playFile(file.id)}
-              className="flex w-full cursor-pointer items-center gap-3 rounded px-2 py-2 text-left hover:bg-slate-800"
-            >
-              {file.coverImagePath ? (
-                <img src={fileCoverUrl(file.id)} alt="" className="h-10 w-10 flex-shrink-0 rounded object-cover" />
-              ) : (
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-slate-800 text-slate-600">
-                  ♪
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{file.title ?? file.filename}</div>
-                <Link
-                  to={`/library/folder/${file.folderId}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="block truncate text-xs text-slate-400 hover:text-indigo-400 hover:underline"
-                >
-                  View folder
-                </Link>
-              </div>
-              <RatingStars value={file.rating} readOnly size="sm" />
-            </div>
-          ))}
+          {data?.files.map((entry) => {
+            const file: FileRowType = {
+              id: entry.id,
+              filename: entry.filename,
+              title: entry.title,
+              trackNumber: entry.trackNumber,
+              durationSec: entry.durationSec,
+              coverImagePath: entry.coverImagePath,
+              rating: entry.rating,
+              hasTranscript: entry.hasTranscript,
+              tags: entry.tags,
+            };
+            return (
+              <FileRow
+                key={entry.id}
+                file={file}
+                isCurrent={currentFile?.id === entry.id}
+                onPlay={() => playFile(entry.id)}
+                onRate={(rating) => setRating.mutate({ fileId: entry.id, rating })}
+                onClearRating={() => clearRating.mutate(entry.id)}
+                onViewTranscript={() => setViewingTranscriptFileId(entry.id)}
+                onEditTags={() => setEditingTagsFileId(entry.id)}
+                subtitle={
+                  <Link
+                    to={`/library/folder/${entry.folderId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="block truncate text-xs text-slate-400 hover:text-indigo-400 hover:underline"
+                  >
+                    View folder
+                  </Link>
+                }
+              />
+            );
+          })}
           {!tracksLoading && data?.files.length === 0 && (
             <div className="text-center text-slate-500">No tracks match{selectedIds.length > 1 ? ` (${mode === "all" ? "all" : "any"} selected tags)` : ""}.</div>
           )}
         </div>
+      )}
+
+      {viewingTranscriptFileId !== null && (
+        <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
+      )}
+      {editingTagsFileId !== null && (
+        <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
       )}
     </div>
   );

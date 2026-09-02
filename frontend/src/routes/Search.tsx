@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useSearch } from "../api/hooks/folder";
 import { api } from "../api/client";
-import { fileCoverUrl, folderCoverUrl } from "../api/client";
+import { folderCoverUrl } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
-import { useSetFolderRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
 import RatingStars from "../components/RatingStars";
-import TagList from "../components/TagList";
-import type { FileDetail } from "../api/types";
+import FileRow from "../components/FileRow";
+import TagEditor from "../components/TagEditor";
+import TranscriptModal from "../components/TranscriptModal";
+import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
 export default function Search() {
   const [searchParams] = useSearchParams();
@@ -18,8 +20,14 @@ export default function Search() {
   useEffect(() => setQ(urlQuery), [urlQuery]);
   const { data, isLoading } = useSearch(q);
   const play = usePlayerStore((s) => s.play);
+  const currentFile = usePlayerStore((s) => s.currentFile);
   const navigate = useNavigate();
+  const setRating = useSetRating();
+  const clearRating = useClearRating();
   const setFolderRating = useSetFolderRating();
+  const clearFolderRating = useClearFolderRating();
+  const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
+  const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
   async function playFile(fileId: number) {
     const file = await api.get<FileDetail>(`/files/${fileId}`);
@@ -50,7 +58,7 @@ export default function Search() {
               onKeyDown={(e) => e.key === "Enter" && navigate(`/library/folder/${folder.id}`)}
               className="flex w-full cursor-pointer items-center gap-3 rounded px-2 py-2 hover:bg-slate-800"
             >
-              {folder.cover_image_path ? (
+              {folder.coverImagePath ? (
                 <img
                   src={folderCoverUrl(folder.id)}
                   alt=""
@@ -64,12 +72,13 @@ export default function Search() {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm">{folder.name}</div>
                 <div className="truncate text-xs text-slate-400">
-                  {folder.relative_path} · {folder.file_count} file{folder.file_count === 1 ? "" : "s"}
+                  {folder.relativePath} · {folder.fileCount} file{folder.fileCount === 1 ? "" : "s"}
                 </div>
               </div>
               <RatingStars
                 value={folder.rating}
                 onChange={(rating) => setFolderRating.mutate({ folderId: folder.id, rating })}
+                onClear={() => clearFolderRating.mutate(folder.id)}
                 size="sm"
               />
             </div>
@@ -81,48 +90,53 @@ export default function Search() {
         <h2 className="text-xs font-medium uppercase text-slate-500">Tracks</h2>
       )}
       <div className="space-y-1">
-        {data?.files.map((file) => {
-          const subtitle = [file.parsed_author, file.parsed_series_or_book].filter(Boolean).join(" · ");
+        {data?.files.map((entry) => {
+          const file: FileRowType = {
+            id: entry.id,
+            filename: entry.filename,
+            title: entry.title,
+            trackNumber: entry.trackNumber,
+            durationSec: entry.durationSec,
+            coverImagePath: entry.coverImagePath,
+            rating: entry.rating,
+            hasTranscript: entry.hasTranscript,
+            tags: entry.tags,
+          };
+          const subtitle = [entry.parsedAuthor, entry.parsedSeriesOrBook].filter(Boolean).join(" · ");
           return (
-            <div
-              key={file.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => playFile(file.id)}
-              onKeyDown={(e) => e.key === "Enter" && playFile(file.id)}
-              className="flex w-full cursor-pointer items-center gap-3 rounded px-2 py-2 text-left hover:bg-slate-800"
-            >
-              {file.cover_image_path ? (
-                <img src={fileCoverUrl(file.id)} alt="" className="h-10 w-10 flex-shrink-0 rounded object-cover" />
-              ) : (
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-slate-800 text-slate-600">
-                  ♪
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{file.title ?? file.filename}</div>
-                {subtitle && (
+            <FileRow
+              key={entry.id}
+              file={file}
+              isCurrent={currentFile?.id === entry.id}
+              onPlay={() => playFile(entry.id)}
+              onRate={(rating) => setRating.mutate({ fileId: entry.id, rating })}
+              onClearRating={() => clearRating.mutate(entry.id)}
+              onViewTranscript={() => setViewingTranscriptFileId(entry.id)}
+              onEditTags={() => setEditingTagsFileId(entry.id)}
+              subtitle={
+                subtitle ? (
                   <Link
-                    to={`/library/folder/${file.folder_id}`}
+                    to={`/library/folder/${entry.folderId}`}
                     onClick={(e) => e.stopPropagation()}
                     className="block truncate text-xs text-slate-400 hover:text-indigo-400 hover:underline"
                   >
                     {subtitle}
                   </Link>
-                )}
-                {file.tags.length > 0 && (
-                  <div className="mt-1">
-                    <TagList tags={file.tags} />
-                  </div>
-                )}
-              </div>
-              <RatingStars value={file.rating} readOnly size="sm" />
-            </div>
+                ) : undefined
+              }
+            />
           );
         })}
       </div>
       {q && !isLoading && data?.folders.length === 0 && data?.files.length === 0 && (
         <div className="text-center text-slate-500">No results for "{q}".</div>
+      )}
+
+      {viewingTranscriptFileId !== null && (
+        <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
+      )}
+      {editingTagsFileId !== null && (
+        <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
       )}
     </div>
   );

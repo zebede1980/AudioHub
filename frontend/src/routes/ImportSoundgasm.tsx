@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useLibraryRoots } from "../api/hooks/library";
 import { useFolder } from "../api/hooks/folder";
-import { useSetRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import {
   useListSoundgasmPosts,
   useResolveSoundgasmPost,
@@ -39,6 +39,7 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
   const folderLink = useSoundgasmDownloadFolder(jobId, job.data !== undefined && job.data.status !== "running");
   const { data: folder } = useFolder(folderLink.data?.folderId, { sort: "track" });
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
@@ -127,6 +128,7 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
               isCurrent={currentFile?.id === file.id}
               onPlay={() => playFile(file.id)}
               onRate={(rating) => setRating.mutate({ fileId: file.id, rating })}
+              onClearRating={() => clearRating.mutate(file.id)}
               onViewTranscript={() => setViewingTranscriptFileId(file.id)}
               onEditTags={() => setEditingTagsFileId(file.id)}
             />

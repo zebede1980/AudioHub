@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useLibraryRoots, useRatedFiles, useRecentFiles, useRootFolder } from "../api/hooks/library";
-import { useSetRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
@@ -45,6 +45,7 @@ function LibraryRootCard({ root }: { root: LibraryRoot }) {
 function RatedFilesList() {
   const { data, isLoading } = useRatedFiles();
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
@@ -82,6 +83,7 @@ function RatedFilesList() {
             isCurrent={currentFile?.id === entry.id}
             onPlay={() => playFile(entry.id)}
             onRate={(rating) => setRating.mutate({ fileId: entry.id, rating })}
+            onClearRating={() => clearRating.mutate(entry.id)}
             onViewTranscript={() => setViewingTranscriptFileId(entry.id)}
             onEditTags={() => setEditingTagsFileId(entry.id)}
             subtitle={
@@ -110,6 +112,7 @@ function RatedFilesList() {
 function RecentFilesList() {
   const { data, isLoading } = useRecentFiles();
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
@@ -151,6 +154,7 @@ function RecentFilesList() {
             isCurrent={currentFile?.id === entry.id}
             onPlay={() => playFile(entry.id)}
             onRate={(rating) => setRating.mutate({ fileId: entry.id, rating })}
+            onClearRating={() => clearRating.mutate(entry.id)}
             onViewTranscript={() => setViewingTranscriptFileId(entry.id)}
             onEditTags={() => setEditingTagsFileId(entry.id)}
             subtitle={

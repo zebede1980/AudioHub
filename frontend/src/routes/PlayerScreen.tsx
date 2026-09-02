@@ -4,7 +4,7 @@ import { usePlayerStore } from "../player/usePlayerStore";
 import { fileCoverUrl } from "../api/client";
 import RatingStars from "../components/RatingStars";
 import TagEditor from "../components/TagEditor";
-import { useSetRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import { useFileTags } from "../api/hooks/tags";
 import {
   useTranscript,
@@ -124,6 +124,7 @@ export default function PlayerScreen() {
   const setVolume = usePlayerStore((s) => s.setVolume);
   const setPlaybackRate = usePlayerStore((s) => s.setPlaybackRate);
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const [editingTags, setEditingTags] = useState(false);
 
   if (!currentFile) {
@@ -164,7 +165,11 @@ export default function PlayerScreen() {
         )}
       </div>
 
-      <RatingStars value={currentFile.rating} onChange={(rating) => setRating.mutate({ fileId: currentFile.id, rating })} />
+      <RatingStars
+        value={currentFile.rating}
+        onChange={(rating) => setRating.mutate({ fileId: currentFile.id, rating })}
+        onClear={() => clearRating.mutate(currentFile.id)}
+      />
 
       <div className="w-full">
         <input

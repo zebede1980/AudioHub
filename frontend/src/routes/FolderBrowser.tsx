@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { useFolder } from "../api/hooks/folder";
-import { useSetRating, useSetFolderRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
 import { useTranscribeFolder, useTranscriptionStatus, useCancelTranscription } from "../api/hooks/transcribe";
 import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
@@ -66,7 +66,9 @@ export default function FolderBrowser() {
   const [folderSort, setFolderSort] = useState("name");
   const { data, isLoading, isError } = useFolder(id, { sort, page, folderSort });
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const setFolderRating = useSetFolderRating();
+  const clearFolderRating = useClearFolderRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
@@ -102,6 +104,7 @@ export default function FolderBrowser() {
           <RatingStars
             value={folder.rating}
             onChange={(rating) => setFolderRating.mutate({ folderId: folder.id, rating })}
+            onClear={() => clearFolderRating.mutate(folder.id)}
           />
         </div>
       )}
@@ -122,6 +125,7 @@ export default function FolderBrowser() {
       <FolderGrid
         folders={subfolders}
         onRate={(folderId, rating) => setFolderRating.mutate({ folderId, rating })}
+        onClearRating={(folderId) => clearFolderRating.mutate(folderId)}
       />
 
       {files.length > 0 && (
@@ -155,6 +159,7 @@ export default function FolderBrowser() {
                 isCurrent={currentFile?.id === file.id}
                 onPlay={() => playFile(file.id)}
                 onRate={(rating) => setRating.mutate({ fileId: file.id, rating })}
+                onClearRating={() => clearRating.mutate(file.id)}
                 onViewTranscript={() => setViewingTranscriptFileId(file.id)}
                 onEditTags={() => setEditingTagsFileId(file.id)}
               />

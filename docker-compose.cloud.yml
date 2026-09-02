@@ -24,6 +24,54 @@
 ## To update to the latest published image later:
 ##   docker compose -f docker-compose.cloud.yml pull && docker compose -f docker-compose.cloud.yml up -d
 ##
+## Reverse proxy (terminate TLS, expose a domain):
+## Point an A record for your chosen subdomain at this box's IP first — needed either way, for the
+## proxy's own TLS cert. Then, in whatever proxies to 127.0.0.1:8420:
+##   - Raise the upload size limit — nginx's default (1MB) will reject a synced audiobook file long
+##     before it reaches AudioHub (which itself accepts up to 5GB): `client_max_body_size 2G;`
+##   - Raise proxy timeouts for the same reason, over a slow home upload link: `proxy_read_timeout
+##     300s;` and `proxy_send_timeout 300s;`
+##   - Set the standard forwarded headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto,
+##     X-Forwarded-Host) — AudioHub's CSRF check and login rate-limiting rely on them being correct.
+##
+## Plain nginx example:
+##   server {
+##     listen 443 ssl;
+##     server_name audiohub.yourdomain.com;
+##     ssl_certificate     /etc/letsencrypt/live/audiohub.yourdomain.com/fullchain.pem;
+##     ssl_certificate_key /etc/letsencrypt/live/audiohub.yourdomain.com/privkey.pem;
+##     client_max_body_size 2G;
+##     proxy_read_timeout   300s;
+##     proxy_send_timeout   300s;
+##     location / {
+##       proxy_pass http://127.0.0.1:8420;
+##       proxy_set_header Host              $host;
+##       proxy_set_header X-Real-IP         $remote_addr;
+##       proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+##       proxy_set_header X-Forwarded-Proto $scheme;
+##       proxy_set_header X-Forwarded-Host  $host;
+##     }
+##   }
+##
+## Nginx Proxy Manager instead: Add Proxy Host -> Details tab: Scheme http, Forward Hostname/IP +
+## Forward Port as below, Websockets Support off (not used) -> SSL tab: request/attach the cert ->
+## Advanced tab, Custom Nginx Configuration:
+##   client_max_body_size 2G;
+##   proxy_read_timeout 300s;
+##   proxy_send_timeout 300s;
+## (NPM sets the forwarded headers for you.)
+##
+## Forward Hostname/IP depends on where NPM runs:
+##   - NPM as its own container (as in the local docker-compose.yml's nginx-proxy-nw pattern): it
+##     can't reach 127.0.0.1:8420 below — that's NPM's own container loopback, not the host's. Put
+##     this audiohub service on the same external Docker network as your NPM container (add a
+##     top-level `networks:` block here plus `networks: [that-network]` under the audiohub service,
+##     matching how docker-compose.yml joins nginx-proxy-nw) and set Forward Hostname/IP to this
+##     container's name (`audiohub-cloud`), Forward Port 8420 — not an IP at all.
+##   - NPM running directly on this host (not containerized), or a plain host-level nginx as in the
+##     example above: Forward Hostname/IP is `127.0.0.1`, Forward Port `8420`, exactly as published
+##     below.
+##
 services:
   audiohub:
     image: ghcr.io/zebede1980/audiohub:latest

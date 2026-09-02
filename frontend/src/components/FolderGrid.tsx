@@ -6,9 +6,10 @@ import type { FolderSummary } from "../api/types";
 interface Props {
   folders: FolderSummary[];
   onRate?: (folderId: number, rating: number) => void;
+  onClearRating?: (folderId: number) => void;
 }
 
-export default function FolderGrid({ folders, onRate }: Props) {
+export default function FolderGrid({ folders, onRate, onClearRating }: Props) {
   if (folders.length === 0) return null;
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -30,7 +31,12 @@ export default function FolderGrid({ folders, onRate }: Props) {
             {folder.fileCount} file{folder.fileCount === 1 ? "" : "s"}
           </div>
           {onRate && (
-            <RatingStars value={folder.rating} onChange={(rating) => onRate(folder.id, rating)} size="sm" />
+            <RatingStars
+              value={folder.rating}
+              onChange={(rating) => onRate(folder.id, rating)}
+              onClear={onClearRating ? () => onClearRating(folder.id) : undefined}
+              size="sm"
+            />
           )}
         </Link>
       ))}

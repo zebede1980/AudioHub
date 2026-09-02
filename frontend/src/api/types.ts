@@ -64,6 +64,7 @@ export interface TaggedTrack {
   coverImagePath: string | null;
   rating: number | null;
   hasTranscript: boolean;
+  tags: FileTagSummary[];
 }
 
 export interface FolderDetail {
@@ -135,23 +136,25 @@ export interface RecentFile {
 
 export interface SearchResultRow {
   id: number;
-  folder_id: number;
+  folderId: number;
   title: string | null;
+  trackNumber: number | null;
   filename: string;
-  parsed_author: string | null;
-  parsed_series_or_book: string | null;
-  duration_sec: number | null;
-  cover_image_path: string | null;
+  parsedAuthor: string | null;
+  parsedSeriesOrBook: string | null;
+  durationSec: number | null;
+  coverImagePath: string | null;
   rating: number | null;
+  hasTranscript: boolean;
   tags: FileTagSummary[];
 }
 
 export interface FolderSearchResult {
   id: number;
   name: string;
-  relative_path: string;
-  file_count: number;
-  cover_image_path: string | null;
+  relativePath: string;
+  fileCount: number;
+  coverImagePath: string | null;
   rating: number | null;
 }
 

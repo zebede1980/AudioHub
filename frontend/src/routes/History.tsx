@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { usePlayHistory, useClearPlayHistory } from "../api/hooks/history";
-import { useSetRating } from "../api/hooks/ratings";
+import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
@@ -13,6 +13,7 @@ export default function History() {
   const { data, isLoading } = usePlayHistory();
   const clear = useClearPlayHistory();
   const setRating = useSetRating();
+  const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
@@ -62,6 +63,7 @@ export default function History() {
               isCurrent={currentFile?.id === entry.fileId}
               onPlay={() => playFile(entry.fileId)}
               onRate={(rating) => setRating.mutate({ fileId: entry.fileId, rating })}
+              onClearRating={() => clearRating.mutate(entry.fileId)}
               onViewTranscript={() => setViewingTranscriptFileId(entry.fileId)}
               onEditTags={() => setEditingTagsFileId(entry.fileId)}
               subtitle={

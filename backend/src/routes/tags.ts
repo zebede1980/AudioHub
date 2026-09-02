@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { asc, eq, sql } from "drizzle-orm";
 import { db, rawDb } from "../db/client.js";
 import { tags, fileTags, files } from "../db/schema.js";
+import { tagsByFileId } from "../db/tagLookup.js";
 
 function normalizeTagName(raw: unknown): string | null {
   const name = String(raw ?? "").trim();
@@ -79,9 +80,12 @@ export default async function tagsRoutes(fastify: FastifyInstance) {
            LIMIT ? OFFSET ?`
         )
         .all(...tagIds, ...(mode === "all" ? [tagIds.length] : []), pageSize, offset)
-        .map((row: any) => ({ ...row, hasTranscript: !!row.hasTranscript }));
+        .map((row: any) => ({ ...row, hasTranscript: !!row.hasTranscript })) as { id: number }[];
 
-      reply.send({ files: rows, page, pageSize });
+      const tagsByFile = tagsByFileId(rows.map((r) => r.id));
+      const rowsWithTags = rows.map((r) => ({ ...r, tags: tagsByFile.get(r.id) ?? [] }));
+
+      reply.send({ files: rowsWithTags, page, pageSize });
     }
   );
 

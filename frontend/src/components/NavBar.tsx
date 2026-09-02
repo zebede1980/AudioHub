@@ -20,8 +20,8 @@ export default function NavBar() {
   }
 
   return (
-    <div className="sticky top-0 z-30 flex items-center gap-1 border-b border-slate-800 bg-slate-900/95 px-2 py-2 backdrop-blur">
-      <div className="flex shrink-0 items-center gap-1">
+    <div className="sticky top-0 z-30 flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900/95 px-2 py-2 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-1">
         <NavLink to="/library" className={linkClass}>
           Library
         </NavLink>
@@ -42,7 +42,9 @@ export default function NavBar() {
         </NavLink>
       </div>
 
-      <form onSubmit={onSearchSubmit} className="flex min-w-0 flex-1 justify-center px-2">
+      {/* basis-full on narrow screens gives the search box its own row instead of squeezing it
+          down to unusable width alongside six nav links; sm: and up shares the row as before. */}
+      <form onSubmit={onSearchSubmit} className="order-last flex min-w-0 flex-1 basis-full justify-center sm:order-none sm:basis-auto sm:px-2">
         <input
           type="search"
           placeholder="Search…"

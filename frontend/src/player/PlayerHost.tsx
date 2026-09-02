@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import { usePlayerStore } from "./usePlayerStore";
+import { api } from "../api/client";
+import type { FileDetail } from "../api/types";
 import {
   setupMediaSessionHandlers,
   updateMediaSessionMetadata,
@@ -40,6 +42,18 @@ export default function PlayerHost() {
       registerAudioElement(audioRef.current);
       setupMediaSessionHandlers();
     }
+
+    // Restore the last session (if any) so reopening the app doesn't lose your place — loaded
+    // paused, never auto-played, both because browsers block unprompted autoplay and because
+    // audio suddenly starting on load would be a bad surprise.
+    api
+      .get<{ current: { file: { id: number }; positionSec: number } | null }>("/playback/resume")
+      .then(async ({ current }) => {
+        if (!current || usePlayerStore.getState().currentFile) return;
+        const file = await api.get<FileDetail>(`/files/${current.file.id}`);
+        usePlayerStore.getState().loadForResume(file, current.positionSec);
+      })
+      .catch(() => {});
     // Intentionally runs only once for the app's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -15,13 +15,23 @@ interface Props {
   isCurrent: boolean;
   onPlay: () => void;
   onRate: (rating: number) => void;
+  onClearRating?: () => void;
   onViewTranscript?: () => void;
   onEditTags?: () => void;
   /** Extra context line under the duration (e.g. a folder link + timestamp) for cross-folder lists like History or Recently Added. */
   subtitle?: React.ReactNode;
 }
 
-export default function FileRow({ file, isCurrent, onPlay, onRate, onViewTranscript, onEditTags, subtitle }: Props) {
+export default function FileRow({
+  file,
+  isCurrent,
+  onPlay,
+  onRate,
+  onClearRating,
+  onViewTranscript,
+  onEditTags,
+  subtitle,
+}: Props) {
   return (
     <div className={`flex w-full items-center gap-3 rounded px-2 py-2 hover:bg-slate-800 ${isCurrent ? "bg-slate-800" : ""}`}>
       {/* A plain div (not <button>) so subtitle can safely nest a real <Link> — a real <button> can't contain interactive content. */}
@@ -72,7 +82,7 @@ export default function FileRow({ file, isCurrent, onPlay, onRate, onViewTranscr
           🏷️
         </button>
       )}
-      <RatingStars value={file.rating} onChange={onRate} size="sm" />
+      <RatingStars value={file.rating} onChange={onRate} onClear={onClearRating} size="sm" />
     </div>
   );
 }

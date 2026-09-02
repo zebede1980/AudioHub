@@ -13,6 +13,9 @@ interface PlayerState {
 
   registerAudioElement: (el: HTMLAudioElement) => void;
   play: (file: FileDetail, startAtSec?: number) => void;
+  /** Loads a file and seeks to a saved position without starting playback — used to restore the
+   * mini-player to a previous session on app load without fighting browser autoplay policies. */
+  loadForResume: (file: FileDetail, positionSec: number) => void;
   togglePlay: () => void;
   seek: (sec: number) => void;
   skip: (deltaSec: number) => void;
@@ -20,7 +23,7 @@ interface PlayerState {
   prev: () => void;
   setVolume: (v: number) => void;
   setPlaybackRate: (r: number) => void;
-  setCurrentFileRating: (fileId: number, rating: number) => void;
+  setCurrentFileRating: (fileId: number, rating: number | null) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => {
@@ -80,6 +83,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
         // Best-effort — a failed history log shouldn't disrupt playback.
         api.post("/history", { fileId: file.id }).catch(() => {});
       }
+    },
+
+    loadForResume: (file, positionSec) => {
+      const el = get().audioEl;
+      if (!el) return;
+      set({ currentFile: file });
+      el.src = `/api/files/${file.id}/stream`;
+      el.currentTime = positionSec;
+      set({ currentTime: positionSec });
+      // Deliberately no el.play() (autoplay-on-load would be blocked by the browser anyway, and
+      // would be a surprising way for audio to start) and no history log — this only restores UI
+      // state; playing it for real happens when the user taps the mini-player's play button.
     },
 
     togglePlay: () => {
