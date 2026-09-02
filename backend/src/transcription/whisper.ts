@@ -8,9 +8,14 @@ export interface WhisperResult {
 }
 
 /** Runs whisper.cpp on a 16kHz mono WAV file and returns the plain-text transcript. */
-export function runWhisper(wavPath: string, modelPath: string, outputBasePath: string): Promise<WhisperResult> {
+export function runWhisper(
+  wavPath: string,
+  modelPath: string,
+  outputBasePath: string,
+  vadModelPath: string | null
+): Promise<WhisperResult> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(config.transcription.whisperCliPath, [
+    const args = [
       "-m",
       modelPath,
       "-f",
@@ -21,7 +26,15 @@ export function runWhisper(wavPath: string, modelPath: string, outputBasePath: s
       "-nt", // suppress per-line timestamps in the console log (the .txt output is already plain text)
       "-l",
       "auto", // whisper-cli defaults to forced English otherwise, skipping language detection entirely
-    ]);
+      // Carry no (or little) text context between 30s windows — see config.transcription.maxContext
+      // for why this matters on audio with long non-speech stretches.
+      "-mc",
+      String(config.transcription.maxContext),
+    ];
+    if (config.transcription.suppressNonSpeech) args.push("-sns");
+    if (vadModelPath) args.push("--vad", "-vm", vadModelPath);
+
+    const proc = spawn(config.transcription.whisperCliPath, args);
 
     let stderr = "";
     proc.stderr.on("data", (chunk: Buffer) => {

@@ -142,6 +142,9 @@ export const transcripts = sqliteTable("transcripts", {
   language: text("language"),
   model: text("model").notNull(),
   createdAt: integer("created_at").notNull(),
+  /** Longest run of the same sentence back to back — see transcription/quality.ts. NULL for
+   * transcripts written before this was measured. */
+  repeatRun: integer("repeat_run"),
 });
 
 export const tags = sqliteTable("tags", {
@@ -205,5 +208,28 @@ export const syncReceipts = sqliteTable("sync_receipts", {
   relativePath: text("relative_path").notNull(),
   receivedAt: integer("received_at").notNull(),
 });
+
+// A folder deleted from the library is moved into <library root>/.audiohub-trash rather than
+// erased, and one of these rows is what makes it restorable (and what the retention sweep reads to
+// purge it for real later). metadataSnapshot holds the ratings/tags/transcripts of everything
+// inside, since the scanner drops those DB rows as soon as the audio disappears from the library.
+export const trashEntries = sqliteTable(
+  "trash_entries",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    libraryRootId: integer("library_root_id").notNull().references(() => libraryRoots.id, { onDelete: "cascade" }),
+    originalRelativePath: text("original_relative_path").notNull(),
+    trashRelativePath: text("trash_relative_path").notNull(),
+    name: text("name").notNull(),
+    fileCount: integer("file_count").notNull().default(0),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    deletedAt: integer("deleted_at").notNull(),
+    metadataSnapshot: text("metadata_snapshot"),
+  },
+  (t) => ({
+    uniqTrashPath: uniqueIndex("idx_trash_entries_path").on(t.libraryRootId, t.trashRelativePath),
+    deletedAtIdx: index("idx_trash_entries_deleted_at").on(t.deletedAt),
+  })
+);
 
 export const sqlNow = sql`(unixepoch() * 1000)`;

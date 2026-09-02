@@ -2,34 +2,56 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 
-let ensurePromise: Promise<string> | null = null;
+const inFlight = new Map<string, Promise<string>>();
 
 /**
- * Downloads the whisper.cpp ggml model into the /data volume on first use (not baked into the
- * Docker image — keeps rebuilds fast and avoids re-downloading a multi-hundred-MB file on every
- * deploy). Concurrent callers share the same in-flight download instead of racing.
+ * Downloads a ggml model into the /data volume on first use (not baked into the Docker image —
+ * keeps rebuilds fast and avoids re-downloading a multi-hundred-MB file on every deploy).
+ * Concurrent callers share the same in-flight download instead of racing.
  */
-export function ensureModel(): Promise<string> {
-  const modelPath = path.join(config.transcription.modelDir, config.transcription.modelName);
+function ensureModelFile(fileName: string, url: string): Promise<string> {
+  const modelPath = path.join(config.transcription.modelDir, fileName);
   if (fs.existsSync(modelPath)) return Promise.resolve(modelPath);
 
-  if (!ensurePromise) {
-    ensurePromise = downloadModel(modelPath).catch((err) => {
-      ensurePromise = null;
-      throw err;
-    });
-  }
-  return ensurePromise;
+  const existing = inFlight.get(modelPath);
+  if (existing) return existing;
+
+  const download = downloadModel(modelPath, url).catch((err) => {
+    inFlight.delete(modelPath);
+    throw err;
+  });
+  inFlight.set(modelPath, download);
+  return download;
 }
 
-async function downloadModel(modelPath: string): Promise<string> {
+/** The speech-to-text model itself. A failure here fails the batch — there's nothing to run without it. */
+export function ensureModel(): Promise<string> {
+  return ensureModelFile(config.transcription.modelName, config.transcription.modelUrl);
+}
+
+/**
+ * The voice-activity model used to skip non-speech regions. Best-effort: if it's disabled or the
+ * download fails, transcription still runs (just without VAD) rather than the whole batch dying
+ * over an optional accuracy aid.
+ */
+export async function ensureVadModel(): Promise<string | null> {
+  if (!config.transcription.vadEnabled) return null;
+  try {
+    return await ensureModelFile(config.transcription.vadModelName, config.transcription.vadModelUrl);
+  } catch (err) {
+    console.warn("VAD model unavailable — transcribing without voice activity detection", err);
+    return null;
+  }
+}
+
+async function downloadModel(modelPath: string, url: string): Promise<string> {
   fs.mkdirSync(path.dirname(modelPath), { recursive: true });
   const tempPath = `${modelPath}.downloading`;
 
-  const res = await fetch(config.transcription.modelUrl);
+  const res = await fetch(url);
   const body = res.body;
   if (!res.ok || !body) {
-    throw new Error(`failed to download whisper model: HTTP ${res.status}`);
+    throw new Error(`failed to download model ${path.basename(modelPath)}: HTTP ${res.status}`);
   }
 
   const fileStream = fs.createWriteStream(tempPath);

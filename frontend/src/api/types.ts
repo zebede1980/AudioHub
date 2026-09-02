@@ -217,6 +217,11 @@ export interface Transcript {
   language: string | null;
   model: string;
   createdAt: number;
+  /** Longest run of the same sentence back to back; null for transcripts written before this
+   * was measured. */
+  repeatRun: number | null;
+  /** Server's verdict on that run — the threshold lives in the backend config. */
+  repetitionSuspect: boolean;
 }
 
 export type FileTranscriptionStatus = "queued" | "transcribing" | "done" | "error" | "skipped";
@@ -235,4 +240,68 @@ export interface TranscriptionStatus {
   startedAt?: number;
   finishedAt?: number;
   error?: string;
+}
+
+/** A 1-star folder as shown on the delete-review screen. Counts are recursive — everything a
+ * delete would actually take, including files in subfolders. */
+export interface FolderReviewRow {
+  id: number;
+  name: string;
+  relativePath: string;
+  libraryRootId: number;
+  libraryRootName: string;
+  coverImagePath: string | null;
+  rating: number;
+  ratedAt: number;
+  fileCount: number;
+  sizeBytes: number;
+  durationSec: number;
+  subfolderCount: number;
+  maxFileRating: number | null;
+  highlyRatedFileCount: number;
+  transcriptCount: number;
+  lastPlayedAt: number | null;
+}
+
+export interface FolderContentsFile {
+  id: number;
+  filename: string;
+  title: string | null;
+  /** Path relative to the reviewed folder, so nesting is visible in the list. */
+  subPath: string;
+  durationSec: number | null;
+  sizeBytes: number;
+  rating: number | null;
+  hasTranscript: boolean;
+  lastPlayedAt: number | null;
+}
+
+export interface FolderContents {
+  files: FolderContentsFile[];
+  truncated: boolean;
+}
+
+export interface FolderDeleteResult {
+  deletedCount: number;
+  total: number;
+  deleted: { folderId: number; name: string; fileCount: number }[];
+  failed: { folderId: number; error: string }[];
+}
+
+export interface TrashEntry {
+  id: number;
+  name: string;
+  originalRelativePath: string;
+  libraryRootId: number;
+  libraryRootName: string;
+  fileCount: number;
+  sizeBytes: number;
+  deletedAt: number;
+  expiresAt: number;
+  presentOnDisk: boolean;
+}
+
+export interface TrashListing {
+  retentionDays: number;
+  entries: TrashEntry[];
 }

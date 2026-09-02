@@ -29,13 +29,47 @@ export interface ScanJobState {
 
 const jobs = new Map<number, ScanJobState>();
 
+/** Callbacks waiting for the current scan of a root to finish — used by trash restore, which can
+ * only re-apply a folder's ratings/tags/transcripts once the scan has re-indexed its files. */
+const completionWaiters = new Map<number, (() => void)[]>();
+
+/**
+ * Roots whose contents changed while a scan was already in flight. That scan may have walked past
+ * the affected folder before the change landed (an import writing a file, a delete moving a folder
+ * to the trash), so its result can't be trusted to include it — a follow-up scan is queued and run
+ * as soon as the current one finishes. Without this, an import that lands mid-scan stays invisible
+ * in the library until the next manual or nightly scan.
+ */
+const pendingRescans = new Map<number, string>();
+
+function drainWaiters(libraryRootId: number) {
+  const waiters = completionWaiters.get(libraryRootId);
+  completionWaiters.delete(libraryRootId);
+  for (const waiter of waiters ?? []) {
+    try {
+      waiter();
+    } catch {
+      // A failed post-scan step must never take down the scan bookkeeping.
+    }
+  }
+}
+
 export function getScanStatus(libraryRootId: number): ScanJobState | undefined {
   return jobs.get(libraryRootId);
 }
 
-export function startScan(libraryRootId: number, containerPath: string): ScanJobState {
+export function startScan(libraryRootId: number, containerPath: string, onComplete?: () => void): ScanJobState {
+  if (onComplete) {
+    completionWaiters.set(libraryRootId, [...(completionWaiters.get(libraryRootId) ?? []), onComplete]);
+  }
+
   const existing = jobs.get(libraryRootId);
-  if (existing?.status === "running") return existing;
+  if (existing?.status === "running") {
+    // Don't just join it — see pendingRescans. Any waiter stays registered and fires after the
+    // follow-up scan instead, which is the one guaranteed to have seen the caller's change.
+    pendingRescans.set(libraryRootId, containerPath);
+    return existing;
+  }
 
   const job: ScanJobState = {
     status: "running",
@@ -64,6 +98,7 @@ export function startScan(libraryRootId: number, containerPath: string): ScanJob
         .set({ lastScanStatus: "ok", lastScannedAt: job.finishedAt, lastScanError: null })
         .where(eq(libraryRoots.id, libraryRootId))
         .run();
+      settleOrRescan(libraryRootId);
     } else if (msg.type === "error") {
       job.status = "error";
       job.error = msg.message;
@@ -72,6 +107,7 @@ export function startScan(libraryRootId: number, containerPath: string): ScanJob
         .set({ lastScanStatus: "error", lastScanError: msg.message ?? "unknown error" })
         .where(eq(libraryRoots.id, libraryRootId))
         .run();
+      settleOrRescan(libraryRootId);
     }
   });
 
@@ -83,9 +119,22 @@ export function startScan(libraryRootId: number, containerPath: string): ScanJob
       .set({ lastScanStatus: "error", lastScanError: err.message })
       .where(eq(libraryRoots.id, libraryRootId))
       .run();
+    settleOrRescan(libraryRootId);
   });
 
   return job;
+}
+
+/** Either runs the follow-up scan queued while this one was in flight, or, if there is none, lets
+ * everything waiting on the scan proceed. */
+function settleOrRescan(libraryRootId: number) {
+  const containerPath = pendingRescans.get(libraryRootId);
+  if (containerPath === undefined) {
+    drainWaiters(libraryRootId);
+    return;
+  }
+  pendingRescans.delete(libraryRootId);
+  startScan(libraryRootId, containerPath);
 }
 
 export async function scanAllEnabledRoots(): Promise<void> {

@@ -28,15 +28,27 @@ hardware behind your own reverse proxy.
 - History, Recently Added, and Top Rated are all fully interactive — rate, tag, view transcripts,
   and play directly from any of these lists, not read-only summaries.
 - Full-text search across titles, filenames, and parsed author/series, plus folder-name search.
-- Bulk cleanup: delete everything at a given star rating (files or whole folders) in one action.
+- Bulk cleanup: delete every 1-star *file* in one action, or review 1-star *folders* one by one
+  before deleting them — the review screen shows each folder's real recursive file count and size,
+  flags anything suspicious inside (a highly rated file, a transcript, a recent play), and lets you
+  play any file without losing your place. Nothing is deleted until you tick a folder and confirm.
+- Trash: deleted folders are moved to a `.audiohub-trash` directory inside their library root, not
+  erased. Restore one from Settings → Trash (ratings, tags, and transcripts come back with it) or
+  empty it early; anything older than 30 days is purged automatically at startup and nightly. Set
+  `TRASH_RETENTION_DAYS` to change the window.
 
 **Import & content pipeline**
 - **Import from Soundgasm** — bulk-import a whole profile, or quick-import a single track from any
   URL. The two are fully independent: a quick import from one uploader never blocks on or depends
   on whatever profile happens to be loaded in the bulk-import flow.
 - **AI transcription** — local speech-to-text via [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
-  (no cloud API, nothing leaves your server), triggered per file or per whole folder, with live
-  progress and cancel.
+  (no cloud API, nothing leaves your server), triggered per file, per row in any list, or per whole
+  folder, with live progress and cancel. Asking for more files while a batch runs appends them to
+  its queue rather than being refused. Tuned against whisper's repetition spiral — no text context
+  carried between windows (`WHISPER_MAX_CONTEXT`), non-speech tokens suppressed
+  (`WHISPER_SUPPRESS_NON_SPEECH`), and voice-activity detection to skip silence (`WHISPER_VAD`,
+  ~1MB model fetched into `/data` on first use). Any transcript that still ends up repeating one
+  sentence is flagged as degraded in the UI, with a one-click re-run.
 - **Convert to MP3** — batch-convert lossless (WAV/FLAC) files to MP3 in place; ratings, tags, play
   history, and playback position all carry over onto the converted file.
 

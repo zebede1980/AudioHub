@@ -18,6 +18,9 @@ function invalidateFolderRatingConsumers(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["folder"] });
   queryClient.invalidateQueries({ queryKey: ["search"] });
   queryClient.invalidateQueries({ queryKey: ["rated-folders"] });
+  // The delete-review screen is a filtered view of folder ratings: clearing a folder's 1 star is
+  // exactly how a user takes it off that list, so it has to refetch too.
+  queryClient.invalidateQueries({ queryKey: ["folders-review"] });
 }
 
 export function useSetRating() {

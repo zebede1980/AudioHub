@@ -51,6 +51,14 @@ function TranscriptSection({ fileId }: { fileId: number }) {
   const myEntry = status?.files?.find((f) => f.fileId === fileId);
   const isThisFileActive =
     myEntry && (myEntry.status === "queued" || myEntry.status === "transcribing") && (status?.status === "downloading-model" || status?.status === "running");
+  // How many files are ahead of this one in the batch — the difference between "any second now"
+  // and "this is eleventh in line", which matters when each file takes minutes.
+  const batchFiles = status?.files ?? [];
+  const myIndex = myEntry ? batchFiles.indexOf(myEntry) : -1;
+  const aheadCount =
+    myIndex < 0
+      ? 0
+      : batchFiles.slice(0, myIndex).filter((f) => f.status === "queued" || f.status === "transcribing").length;
 
   if (isLoading) return null;
 
@@ -74,7 +82,9 @@ function TranscriptSection({ fileId }: { fileId: number }) {
             ? "Downloading speech-to-text model (one-time, ~550MB)…"
             : myEntry?.status === "transcribing"
               ? "Transcribing…"
-              : "Queued…"}
+              : aheadCount > 0
+                ? `Queued — ${aheadCount} file${aheadCount === 1 ? "" : "s"} ahead of it.`
+                : "Queued…"}
         </div>
       ) : transcript ? (
         <p className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-slate-300">{transcript.text}</p>
@@ -89,13 +99,20 @@ function TranscriptSection({ fileId }: { fileId: number }) {
           </button>
         </div>
       ) : (
-        <button
-          onClick={() => transcribeFile.mutate(fileId)}
-          disabled={transcribeFile.isPending}
-          className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
-        >
-          Transcribe this file
-        </button>
+        <div className="space-y-2">
+          <button
+            onClick={() => transcribeFile.mutate(fileId)}
+            disabled={transcribeFile.isPending}
+            className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
+          >
+            {status?.status === "running" || status?.status === "downloading-model"
+              ? "Add to transcription queue"
+              : "Transcribe this file"}
+          </button>
+          {transcribeFile.isError && (
+            <div className="text-sm text-red-400">{(transcribeFile.error as Error).message}</div>
+          )}
+        </div>
       )}
     </div>
   );

@@ -52,8 +52,14 @@ function LibraryRootCard({ root }: { root: LibraryRoot }) {
   );
 }
 
+/** null = the default view: everything rated, highest first. A number = only that star rating,
+ * which is how a 1-star pile gets reviewed before deletion and how a "2 star = look at this
+ * later" pot gets found again. */
+type RatingFilter = number | null;
+
 function RatedFilesList() {
   const { data, isLoading } = useRatedFiles();
+  const [filter, setFilter] = useState<RatingFilter>(null);
   const setRating = useSetRating();
   const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
@@ -68,13 +74,57 @@ function RatedFilesList() {
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
-  if (!data || data.length === 0) {
+  const all = data ?? [];
+  const countFor = (rating: number) => all.filter((f) => f.rating === rating).length;
+  const visible = filter === null ? all : all.filter((f) => f.rating === filter);
+
+  const picker = (
+    <div className="flex items-center justify-between gap-2">
+      <label className="text-xs text-slate-500" htmlFor="rating-filter">
+        Show
+      </label>
+      <select
+        id="rating-filter"
+        value={filter === null ? "all" : String(filter)}
+        onChange={(e) => setFilter(e.target.value === "all" ? null : Number(e.target.value))}
+        className="rounded bg-slate-800 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+      >
+        <option value="all">All ratings, highest first ({all.length})</option>
+        {[5, 4, 3, 2, 1].map((rating) => (
+          <option key={rating} value={rating}>
+            {"★".repeat(rating)} {rating} star{rating === 1 ? "" : "s"} only ({countFor(rating)})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  if (all.length === 0) {
     return <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">No rated files yet.</div>;
   }
 
   return (
-    <div className="space-y-1">
-      {data.map((entry) => {
+    <div className="space-y-2">
+      {picker}
+
+      {filter === 1 && visible.length > 0 && (
+        <div className="rounded-lg border border-slate-800 p-3 text-xs text-slate-500">
+          Deleting these: Settings → Cleanup removes all 1-star <em>files</em> from disk. Whole
+          folders rated 1 star are handled separately, in{" "}
+          <Link to="/settings/cleanup/folders" className="text-indigo-400 hover:underline">
+            Review 1-star folders
+          </Link>
+          .
+        </div>
+      )}
+
+      {visible.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
+          No files rated {filter} star{filter === 1 ? "" : "s"}.
+        </div>
+      ) : null}
+
+      {visible.map((entry) => {
         const file: FileRowType = {
           id: entry.id,
           filename: entry.filename,
@@ -97,13 +147,21 @@ function RatedFilesList() {
             onViewTranscript={() => setViewingTranscriptFileId(entry.id)}
             onEditTags={() => setEditingTagsFileId(entry.id)}
             subtitle={
-              <Link
-                to={`/library/folder/${entry.folderId}`}
-                onClick={(e) => e.stopPropagation()}
-                className="block truncate text-xs text-slate-400 hover:text-indigo-400 hover:underline"
-              >
-                {entry.folderName}
-              </Link>
+              <div className="flex min-w-0 items-center gap-1 truncate text-xs text-slate-400">
+                <Link
+                  to={`/library/folder/${entry.folderId}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="truncate hover:text-indigo-400 hover:underline"
+                >
+                  {entry.folderName}
+                </Link>
+                {filter !== null && (
+                  <>
+                    <span>·</span>
+                    <span className="flex-shrink-0">rated {new Date(entry.ratedAt).toLocaleDateString()}</span>
+                  </>
+                )}
+              </div>
             }
           />
         );
@@ -329,7 +387,7 @@ export default function LibraryRoots() {
           onClick={() => setMode("rated")}
           className={`rounded px-3 py-1 text-sm ${mode === "rated" ? "bg-slate-800 text-white" : "text-slate-400"}`}
         >
-          Top Rated
+          Rated
         </button>
         <button
           onClick={() => setMode("recent")}

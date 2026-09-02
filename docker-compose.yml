@@ -10,12 +10,13 @@ services:
       - "127.0.0.1:8420:8420"
     volumes:
       - ./data:/data
-      # Whole drives. Pick specific subfolders as library roots in Settings afterwards (e.g.
-      # container path /library/j/Audiobooks) — mounting the whole drive here does not mean
+      # Whole drive. Pick specific subfolders as library roots in Settings afterwards (e.g.
+      # container path /library/v/Download/Audio) — mounting the whole drive here does not mean
       # the whole drive gets scanned.
-      - "J:/:/library/j:ro"
-      # Writable (no :ro) so the Soundgasm importer can save downloaded files under
-      # /library/v/.../Soundgasm/<username>. Everything else about this mount is unchanged.
+      #
+      # Writable (no :ro) so the Soundgasm importer can save downloads under
+      # /library/v/.../Soundgasm/<username>, and so deleting a folder can move it into
+      # /library/v/.audiohub-trash rather than failing on a read-only mount.
       - "V:/:/library/v"
       # Add more lines here for any other drives/folders you want available to pick from.
       # - "D:/Audiobooks:/library/audiobooks:ro"

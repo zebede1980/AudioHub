@@ -1,31 +1,46 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { files, transcripts } from "../db/schema.js";
 import { config } from "../config.js";
+import { longestRepeatedRun } from "../transcription/quality.js";
+import { files, transcripts } from "../db/schema.js";
 import {
   startTranscription,
   getTranscriptionStatus,
   cancelTranscription,
+  type StartTranscriptionResult,
 } from "../transcription/transcriptionManager.js";
+
+/** Shared reply shape for both transcribe entry points: what happened to the request, and how
+ * much is now waiting, so the UI can say "queued behind 3 others" instead of guessing. */
+function sendStartResult(reply: FastifyReply, result: StartTranscriptionResult) {
+  if (result.outcome === "cancelling") {
+    reply.code(409).send({ error: "the current transcription batch is cancelling — try again in a moment" });
+    return;
+  }
+  const pendingCount = result.job.files.filter((f) => f.status === "queued" || f.status === "transcribing").length;
+  reply.send({
+    status: result.job.status,
+    outcome: result.outcome,
+    addedCount: result.addedCount,
+    alreadyPendingCount: result.alreadyPendingCount,
+    pendingCount,
+  });
+}
 
 export default async function transcribeRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", fastify.requireAuth);
 
+  // Asking for a file while a batch is running adds it to that batch's queue rather than being
+  // refused — see startTranscription. The only refusal left is a batch that's mid-cancel.
   fastify.post<{ Params: { id: string } }>("/files/:id/transcribe", async (request, reply) => {
-    const existing = getTranscriptionStatus();
-    if (existing && (existing.status === "running" || existing.status === "downloading-model" || existing.status === "cancelling")) {
-      reply.code(409).send({ error: "a transcription batch is already running" });
-      return;
-    }
     const id = Number(request.params.id);
     const file = db.select({ id: files.id }).from(files).where(eq(files.id, id)).get();
     if (!file) {
       reply.code(404).send({ error: "not found" });
       return;
     }
-    const job = startTranscription([id], config.transcription.defaultConcurrency);
-    reply.send({ status: job.status });
+    sendStartResult(reply, startTranscription([id]));
   });
 
   fastify.get<{ Params: { id: string } }>("/files/:id/transcript", async (request, reply) => {
@@ -35,7 +50,21 @@ export default async function transcribeRoutes(fastify: FastifyInstance) {
       reply.code(404).send({ error: "no transcript for this file" });
       return;
     }
-    reply.send(row);
+    // Transcripts written before repetition was measured are scored on first read and the result
+    // stored, so existing bad ones get flagged too without a startup pass over the whole table.
+    let repeatRun = row.repeatRun;
+    if (repeatRun === null) {
+      repeatRun = longestRepeatedRun(row.text);
+      db.update(transcripts).set({ repeatRun }).where(eq(transcripts.id, row.id)).run();
+    }
+
+    // The threshold lives with the rest of the transcription config rather than being duplicated
+    // in the frontend, so tuning it is a one-line server change.
+    reply.send({
+      ...row,
+      repeatRun,
+      repetitionSuspect: repeatRun >= config.transcription.repetitionRunWarning,
+    });
   });
 
   fastify.delete<{ Params: { id: string } }>("/files/:id/transcript", async (request, reply) => {
@@ -45,11 +74,6 @@ export default async function transcribeRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post<{ Params: { id: string } }>("/folders/:id/transcribe", async (request, reply) => {
-    const existing = getTranscriptionStatus();
-    if (existing && (existing.status === "running" || existing.status === "downloading-model" || existing.status === "cancelling")) {
-      reply.code(409).send({ error: "a transcription batch is already running" });
-      return;
-    }
     const folderId = Number(request.params.id);
     const fileIds = db
       .select({ id: files.id })
@@ -63,8 +87,7 @@ export default async function transcribeRoutes(fastify: FastifyInstance) {
       return;
     }
 
-    const job = startTranscription(fileIds, config.transcription.defaultConcurrency);
-    reply.send({ status: job.status });
+    sendStartResult(reply, startTranscription(fileIds));
   });
 
   fastify.get("/transcribe/status", async (_request, reply) => {

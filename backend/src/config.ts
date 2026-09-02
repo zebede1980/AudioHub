@@ -46,6 +46,30 @@ export const config = {
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
     defaultConcurrency: 1,
     maxConcurrency: 2,
+
+    // Anti-repetition settings. whisper feeds the text it just produced into the next 30s window
+    // as context; on audio with long non-speech stretches it emits a filler ("Mm-hmm."), which
+    // then becomes the context that makes it emit the same filler again, and again. Carrying no
+    // text context between windows breaks that loop at the cost of some long-range coherence.
+    maxContext: Number(process.env.WHISPER_MAX_CONTEXT ?? 0),
+    // Stops breaths/ambience being narrated as filler tokens in the first place.
+    suppressNonSpeech: process.env.WHISPER_SUPPRESS_NON_SPEECH !== "false",
+    // Voice activity detection: skip non-speech regions entirely, so the decoder never sees the
+    // silence that starts a spiral. Best-effort — if the model can't be fetched we run without it.
+    vadEnabled: process.env.WHISPER_VAD !== "false",
+    vadModelName: process.env.WHISPER_VAD_MODEL_NAME ?? "ggml-silero-v5.1.2.bin",
+    vadModelUrl:
+      process.env.WHISPER_VAD_MODEL_URL ??
+      "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+    /** A transcript with this many identical sentences back to back is flagged as degraded. Real
+     * audio in this library does repeat short interjections, so the bar sits well above that. */
+    repetitionRunWarning: 10,
+  },
+
+  trash: {
+    // Folders deleted from the library are moved into <library root>/.audiohub-trash and erased
+    // for real only once they are older than this, by the sweep that runs at startup and nightly.
+    retentionDays: Number(process.env.TRASH_RETENTION_DAYS ?? 30),
   },
 
   audioConversion: {

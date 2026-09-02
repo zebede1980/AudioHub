@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
-import { useLibraryRoots } from "../api/hooks/library";
+import { useLibraryRoots, useScanStatus } from "../api/hooks/library";
 import { useFolder } from "../api/hooks/folder";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import {
@@ -34,10 +35,28 @@ const STATUS_STYLE: Record<string, string> = {
  * Each instance polls its own job/folder state, so multiple imports run fully independently.
  */
 function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: string; onDismiss?: () => void }) {
+  const queryClient = useQueryClient();
   const job = useSoundgasmDownloadStatus(jobId);
   const retry = useRetrySoundgasmDownload(jobId);
-  const folderLink = useSoundgasmDownloadFolder(jobId, job.data !== undefined && job.data.status !== "running");
+  const settled = job.data !== undefined && job.data.status !== "running";
+  const folderLink = useSoundgasmDownloadFolder(jobId, settled);
   const { data: folder } = useFolder(folderLink.data?.folderId, { sort: "track" });
+
+  // A finished download is not a finished import: it ends by kicking off a library scan, and only
+  // once that scan has indexed the new audio does it appear in the folder listing below. Watching
+  // the scan is what stops this panel saying "Done." over an empty (or, on a repeat import from
+  // the same uploader, a stale) list — which reads as "the file was never saved".
+  const { data: scan } = useScanStatus(job.data?.libraryRootId, settled);
+  const isIndexing = settled && scan?.status === "running";
+
+  // Refresh the folder — and the folder link, which 404s until the scan creates the folder row —
+  // once there is no scan left to wait for. This fires both when the download settles (covering a
+  // scan that finished before this panel began watching) and when a watched scan completes.
+  useEffect(() => {
+    if (!settled || isIndexing) return;
+    queryClient.invalidateQueries({ queryKey: ["soundgasm-download-folder", jobId] });
+    queryClient.invalidateQueries({ queryKey: ["folder"] });
+  }, [settled, isIndexing, jobId, queryClient]);
   const setRating = useSetRating();
   const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
@@ -62,7 +81,13 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
     <div className="space-y-2 rounded border border-slate-800 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
         <span>
-          {job.data.status === "running" ? "Downloading…" : job.data.status === "ok" ? "Done." : "Job failed."}{" "}
+          {job.data.status === "running"
+            ? "Downloading…"
+            : job.data.status === "error"
+              ? "Job failed."
+              : isIndexing
+                ? "Downloaded — scanning library…"
+                : "Done."}{" "}
           {job.data.items.filter((i) => i.status === "done" || i.status === "skipped").length} /{" "}
           {job.data.items.length} processed
           {failedItems.length > 0 ? `, ${failedItems.length} failed` : ""}
@@ -118,6 +143,32 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
           ))}
         </div>
       )}
+
+      {isIndexing && (
+        <div className="rounded border border-slate-800 p-2 text-xs text-slate-400">
+          Saved to disk. Indexing them into the library…
+          {scan?.progress ? ` ${scan.progress.filesScanned} files seen so far.` : ""} They'll appear below when the
+          scan finishes.
+        </div>
+      )}
+
+      {/* Downloaded fine, scan finished, and still nothing here: say so rather than showing an
+          empty panel that reads as a failed import. */}
+      {settled &&
+        !isIndexing &&
+        job.data.status === "ok" &&
+        folder &&
+        folder.files.length === 0 &&
+        job.data.items.some((i) => i.status === "done" || i.status === "skipped") && (
+          <div className="rounded border border-amber-900/60 bg-amber-950/30 p-2 text-xs text-amber-300">
+            The download finished but the library scan didn't pick anything up in this folder. The files are on disk
+            under <code>{job.data.destDir}</code> — a rescan from{" "}
+            <Link to="/settings" className="underline">
+              Settings
+            </Link>{" "}
+            should surface them.
+          </div>
+        )}
 
       {folder && folder.files.length > 0 && (
         <div className="space-y-1">

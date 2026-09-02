@@ -8,6 +8,7 @@ import { syncConfig, syncReceipts, libraryRoots, files, ratings, tags, fileTags,
 import { sanitizeForFilesystem } from "../scraper/downloadManager.js";
 import { startScan } from "../scanner/scanManager.js";
 import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
+import { longestRepeatedRun } from "../transcription/quality.js";
 
 export interface SyncUploadMeta {
   contentHash: string;
@@ -141,6 +142,7 @@ export function ingestMetadata(contentHash: string, payload: SyncMetadataPayload
         language: payload.transcript.language,
         model: payload.transcript.model,
         createdAt: Date.now(),
+        repeatRun: longestRepeatedRun(payload.transcript.text),
       })
       .onConflictDoUpdate({
         target: transcripts.fileId,

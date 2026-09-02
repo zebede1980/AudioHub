@@ -20,7 +20,10 @@ import convertRoutes from "./routes/convert.js";
 import transcribeRoutes from "./routes/transcribe.js";
 import tagsRoutes from "./routes/tags.js";
 import syncRoutes from "./routes/sync.js";
+import trashRoutes from "./routes/trash.js";
 import { scanAllEnabledRoots } from "./scanner/scanManager.js";
+import { purgeExpiredTrash } from "./trash/trashManager.js";
+import { cleanTranscriptionTempDir } from "./transcription/transcriptionManager.js";
 
 const fastify = Fastify({
   logger: true,
@@ -49,6 +52,7 @@ await fastify.register(convertRoutes, { prefix: "/api" });
 await fastify.register(transcribeRoutes, { prefix: "/api" });
 await fastify.register(tagsRoutes, { prefix: "/api" });
 await fastify.register(syncRoutes, { prefix: "/api" });
+await fastify.register(trashRoutes, { prefix: "/api" });
 
 // Serves the built frontend (frontend/dist copied here at Docker build time) with SPA fallback.
 if (fs.existsSync(config.publicDir)) {
@@ -67,11 +71,32 @@ if (fs.existsSync(config.publicDir)) {
 // Nightly incremental rescan of every enabled library root, in addition to manual + startup scans.
 cron.schedule("0 3 * * *", () => {
   scanAllEnabledRoots().catch((err) => fastify.log.error(err));
+  // Deleted folders sit in the trash for the retention window; this (plus the startup sweep) is
+  // what eventually erases them, so the promise is "gone within a day or so of 30 days".
+  try {
+    const { purgedCount } = purgeExpiredTrash();
+    if (purgedCount > 0) fastify.log.info({ purgedCount }, "purged expired trash entries");
+  } catch (err) {
+    fastify.log.error(err);
+  }
 });
 
 try {
   await fastify.listen({ port: config.port, host: config.host });
   scanAllEnabledRoots().catch((err) => fastify.log.error(err));
+  try {
+    const { purgedCount } = purgeExpiredTrash();
+    if (purgedCount > 0) fastify.log.info({ purgedCount }, "purged expired trash entries at startup");
+  } catch (err) {
+    fastify.log.error(err);
+  }
+  try {
+    // A restart mid-transcription leaves the extraction WAV behind; nothing is in flight here.
+    const { removedFiles, freedBytes } = cleanTranscriptionTempDir();
+    if (removedFiles > 0) fastify.log.info({ removedFiles, freedBytes }, "cleared leftover transcription temp files");
+  } catch (err) {
+    fastify.log.error(err);
+  }
 } catch (err) {
   fastify.log.error(err);
   process.exit(1);

@@ -6,6 +6,7 @@ import { parseFilename, deriveFolderContext } from "./parseFilename.js";
 import { readAudioTags } from "./metadata.js";
 import { computeFingerprint } from "./fingerprint.js";
 import { writeCoverCache } from "./coverCache.js";
+import { TRASH_DIR_NAME } from "../trash/trashPaths.js";
 
 export interface ScanProgress {
   foldersScanned: number;
@@ -122,7 +123,10 @@ export async function scanLibraryRoot(
       continue; // unreadable/transiently-missing directory — skip rather than fail the whole scan
     }
 
-    const subdirs = dirents.filter((d) => d.isDirectory());
+    // The trash directory lives inside the library root but is deliberately not part of the
+    // library: indexing it would resurrect deleted folders in the UI, and the move-detection pass
+    // below would see a trashed folder's files as "moved" and quietly keep them.
+    const subdirs = dirents.filter((d) => d.isDirectory() && !(entry.relativePath === "" && d.name === TRASH_DIR_NAME));
     const audioFiles = dirents.filter(
       (d) => d.isFile() && config.audioExtensions.includes(path.extname(d.name).toLowerCase())
     );

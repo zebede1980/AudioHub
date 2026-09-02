@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
     "start": "node dist/index.js",
     "hash-password": "tsx scripts/hash-password.ts",
-    "test": "node --test --loader tsx test/*.test.ts"
+    "test": "node --test --import tsx test/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",

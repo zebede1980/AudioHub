@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFolder } from "../api/hooks/folder";
 import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
@@ -14,7 +13,6 @@ import TagEditor from "../components/TagEditor";
 import type { FileDetail } from "../api/types";
 
 function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; fileIds: number[] }) {
-  const queryClient = useQueryClient();
   const transcribeFolder = useTranscribeFolder();
   const cancelTranscription = useCancelTranscription();
   const { data: status } = useTranscriptionStatus(true);
@@ -22,12 +20,6 @@ function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; file
   const isActive = status?.status === "running" || status?.status === "downloading-model" || status?.status === "cancelling";
   const relevant = status?.files?.filter((f) => fileIds.includes(f.fileId)) ?? [];
   const isThisFolderActive = isActive && relevant.length > 0;
-
-  useEffect(() => {
-    if (status && (status.status === "done" || status.status === "cancelled") && relevant.length > 0) {
-      queryClient.invalidateQueries({ queryKey: ["folder"] });
-    }
-  }, [status?.status]);
 
   const doneCount = relevant.filter((f) => f.status === "done").length;
   const errorCount = relevant.filter((f) => f.status === "error").length;
@@ -47,14 +39,22 @@ function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; file
     );
   }
 
+  // A batch running for *other* files no longer blocks this button — the server appends these
+  // files to that batch's queue. Only a mid-cancel batch refuses, and that surfaces as an error.
+  const isCancelling = status?.status === "cancelling";
   return (
-    <button
-      onClick={() => transcribeFolder.mutate(folderId)}
-      disabled={isActive || transcribeFolder.isPending}
-      className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
-    >
-      Transcribe folder
-    </button>
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => transcribeFolder.mutate(folderId)}
+        disabled={isCancelling || transcribeFolder.isPending}
+        className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
+      >
+        {isActive ? "Add folder to queue" : "Transcribe folder"}
+      </button>
+      {transcribeFolder.isError && (
+        <span className="text-xs text-red-400">{(transcribeFolder.error as Error).message}</span>
+      )}
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useTranscript } from "../api/hooks/transcribe";
+import { useTranscript, useTranscribeFile, useTranscriptionStatus } from "../api/hooks/transcribe";
 
 interface Props {
   fileId: number;
@@ -7,6 +7,12 @@ interface Props {
 
 export default function TranscriptModal({ fileId, onClose }: Props) {
   const { data: transcript, isLoading } = useTranscript(fileId);
+  const transcribe = useTranscribeFile();
+  const { data: status } = useTranscriptionStatus(true);
+
+  const entry = status?.files?.find((f) => f.fileId === fileId);
+  const batchActive = status?.status === "running" || status?.status === "downloading-model";
+  const isPending = batchActive && (entry?.status === "queued" || entry?.status === "transcribing");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -20,6 +26,32 @@ export default function TranscriptModal({ fileId, onClose }: Props) {
             Close
           </button>
         </div>
+
+        {/* whisper can fall into repeating one sentence for the rest of a file. Saying so beats
+            presenting the result as if it were sound, and re-running often clears it. */}
+        {transcript?.repetitionSuspect && (
+          <div className="mb-3 space-y-2 rounded border border-amber-900/60 bg-amber-950/30 p-3 text-xs text-amber-300">
+            <div>
+              ⚠ This transcript looks degraded — the same sentence repeats {transcript.repeatRun} times in a row,
+              which usually means speech-to-text got stuck rather than the audio actually repeating.
+            </div>
+            <button
+              onClick={() => transcribe.mutate(fileId)}
+              disabled={isPending || transcribe.isPending}
+              className="rounded bg-slate-800 px-2 py-1 text-amber-200 disabled:opacity-50"
+            >
+              {isPending
+                ? entry?.status === "transcribing"
+                  ? "Transcribing…"
+                  : "Queued…"
+                : batchActive
+                  ? "Add to transcription queue"
+                  : "Transcribe again"}
+            </button>
+            {transcribe.isError && <div className="text-red-400">{(transcribe.error as Error).message}</div>}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="text-sm text-slate-500">Loading…</div>
         ) : transcript ? (

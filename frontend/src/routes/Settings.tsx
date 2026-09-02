@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useLibraryRoots,
@@ -9,8 +10,8 @@ import {
   useRatedFiles,
   useDeleteRatedFiles,
   useRatedFolders,
-  useDeleteRatedFolders,
 } from "../api/hooks/library";
+import { useTrash, useRestoreTrashEntry, usePurgeTrashEntry, useEmptyTrash } from "../api/hooks/trash";
 import {
   useConvertibleFiles,
   useStartConversion,
@@ -106,8 +107,6 @@ function CleanupSection() {
 
   const { data: ratedFolders } = useRatedFolders();
   const oneStarFolderCount = ratedFolders?.filter((f) => f.rating === 1).length ?? 0;
-  const deleteFolders = useDeleteRatedFolders();
-  const [folderResult, setFolderResult] = useState<string | null>(null);
 
   async function onDeleteFiles() {
     if (
@@ -123,23 +122,6 @@ function CleanupSection() {
       setFileResult(`Deleted ${res.deletedCount} of ${res.total} file${res.total === 1 ? "" : "s"}.`);
     } catch (err) {
       setFileResult(err instanceof Error ? err.message : "Failed to delete files");
-    }
-  }
-
-  async function onDeleteFolders() {
-    if (
-      !confirm(
-        `Permanently delete ${oneStarFolderCount} folder${oneStarFolderCount === 1 ? "" : "s"} rated 1 star, and everything inside them?\n\nThis deletes the actual folders from disk and cannot be undone.`
-      )
-    ) {
-      return;
-    }
-    setFolderResult(null);
-    try {
-      const res = await deleteFolders.mutateAsync(1);
-      setFolderResult(`Deleted ${res.deletedCount} of ${res.total} folder${res.total === 1 ? "" : "s"}.`);
-    } catch (err) {
-      setFolderResult(err instanceof Error ? err.message : "Failed to delete folders");
     }
   }
 
@@ -165,23 +147,141 @@ function CleanupSection() {
       </div>
       {fileResult && <div className="text-xs text-slate-400">{fileResult}</div>}
 
+      {/* Deleting a folder takes everything inside it, so this deliberately has no one-click
+          delete: it opens a review screen where each folder is confirmed individually. */}
       <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 p-4">
         <div className="min-w-0">
-          <div className="text-sm">Delete all 1-star rated folders</div>
+          <div className="text-sm">Delete 1-star rated folders</div>
           <div className="text-xs text-slate-500">
-            {oneStarFolderCount} folder{oneStarFolderCount === 1 ? "" : "s"} currently rated 1 star. This
-            permanently removes the whole folder — and every file inside it — from disk.
+            {oneStarFolderCount} folder{oneStarFolderCount === 1 ? "" : "s"} currently rated 1 star. Review them one
+            by one — see and play what's inside — then move the ones you confirm to the trash.
           </div>
         </div>
-        <button
-          onClick={onDeleteFolders}
-          disabled={oneStarFolderCount === 0 || deleteFolders.isPending}
-          className="shrink-0 rounded bg-red-900/50 px-3 py-1 text-sm text-red-300 disabled:opacity-50"
+        <Link
+          to="/settings/cleanup/folders"
+          className={`shrink-0 rounded px-3 py-1 text-sm ${
+            oneStarFolderCount === 0 ? "pointer-events-none bg-slate-800 text-slate-500" : "bg-slate-800 text-slate-200"
+          }`}
         >
-          {deleteFolders.isPending ? "Deleting…" : "Delete"}
-        </button>
+          Review…
+        </Link>
       </div>
-      {folderResult && <div className="text-xs text-slate-400">{folderResult}</div>}
+    </section>
+  );
+}
+
+/** The other half of the folder-delete safety net: what was deleted, how long is left to change
+ * your mind, and the two ways to end it early. */
+function TrashSection() {
+  const { data, isLoading } = useTrash();
+  const restore = useRestoreTrashEntry();
+  const purge = usePurgeTrashEntry();
+  const empty = useEmptyTrash();
+  const [message, setMessage] = useState<string | null>(null);
+
+  const entries = data?.entries ?? [];
+  const retentionDays = data?.retentionDays ?? 30;
+  const totalBytes = entries.reduce((sum, e) => sum + e.sizeBytes, 0);
+
+  function daysLeft(expiresAt: number): string {
+    const days = Math.ceil((expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+    if (days <= 0) return "deletes on the next sweep";
+    return `auto-deletes in ${days} day${days === 1 ? "" : "s"}`;
+  }
+
+  async function onRestore(id: number, name: string) {
+    setMessage(null);
+    try {
+      const res = await restore.mutateAsync(id);
+      setMessage(
+        res.renamed
+          ? `Restored "${name}" as "${res.restoredRelativePath}" — something already occupied its original location. Ratings and tags are re-applied once the rescan finishes.`
+          : `Restored "${name}" to ${res.restoredRelativePath}. Ratings and tags are re-applied once the rescan finishes.`
+      );
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to restore");
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium text-slate-400">Trash</h2>
+      <div className="rounded-lg border border-slate-800 p-4 text-xs text-slate-500">
+        Folders deleted from the library are moved into a <code>.audiohub-trash</code> folder inside their library
+        root and erased for good {retentionDays} days later (swept at startup and nightly, so give or take a day).
+        {entries.length > 0 && ` Currently holding ${entries.length} folder${entries.length === 1 ? "" : "s"}, ${formatBytes(totalBytes)}.`}
+      </div>
+
+      {isLoading && <div className="text-xs text-slate-500">Loading…</div>}
+      {!isLoading && entries.length === 0 && <div className="text-xs text-slate-500">The trash is empty.</div>}
+
+      {entries.map((entry) => (
+        <div key={entry.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-800 p-4">
+          <div className="min-w-0">
+            <div className="truncate text-sm">{entry.name}</div>
+            <div className="truncate text-xs text-slate-500">
+              {entry.libraryRootName} · {entry.originalRelativePath}
+            </div>
+            <div className="text-xs text-slate-400">
+              {entry.fileCount} file{entry.fileCount === 1 ? "" : "s"} · {formatBytes(entry.sizeBytes)} · deleted{" "}
+              {new Date(entry.deletedAt).toLocaleDateString()} · {daysLeft(entry.expiresAt)}
+            </div>
+            {!entry.presentOnDisk && (
+              <div className="text-xs text-amber-400">⚠ no longer on disk — it was removed outside AudioHub</div>
+            )}
+          </div>
+          <div className="flex flex-shrink-0 flex-col gap-2">
+            <button
+              onClick={() => onRestore(entry.id, entry.name)}
+              disabled={!entry.presentOnDisk || restore.isPending}
+              className="rounded bg-indigo-600 px-3 py-1 text-sm disabled:opacity-50"
+            >
+              Restore
+            </button>
+            <button
+              onClick={() => {
+                if (
+                  confirm(
+                    `Permanently delete "${entry.name}" (${entry.fileCount} file${entry.fileCount === 1 ? "" : "s"})?
+
+This erases it from disk now instead of waiting out the ${retentionDays} days. It cannot be undone.`
+                  )
+                ) {
+                  purge.mutate(entry.id);
+                }
+              }}
+              className="rounded bg-red-900/50 px-3 py-1 text-sm text-red-300"
+            >
+              Delete now
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {entries.length > 0 && (
+        <button
+          onClick={async () => {
+            if (
+              !confirm(
+                `Permanently delete all ${entries.length} folder${entries.length === 1 ? "" : "s"} in the trash (${formatBytes(totalBytes)})?
+
+This cannot be undone.`
+              )
+            ) {
+              return;
+            }
+            setMessage(null);
+            const res = await empty.mutateAsync();
+            setMessage(`Emptied the trash — ${res.purgedCount} folder${res.purgedCount === 1 ? "" : "s"} erased.`);
+          }}
+          disabled={empty.isPending}
+          className="rounded bg-red-900/50 px-3 py-1 text-sm text-red-300 disabled:opacity-50"
+        >
+          {empty.isPending ? "Emptying…" : "Empty trash now"}
+        </button>
+      )}
+
+      {message && <div className="text-xs text-slate-400">{message}</div>}
     </section>
   );
 }
@@ -545,7 +645,7 @@ export default function Settings() {
           />
           <input
             type="text"
-            placeholder="Container path (e.g. /library/j/Audiobooks)"
+            placeholder="Container path (e.g. /library/v/Download/Audio)"
             value={containerPath}
             onChange={(e) => setContainerPath(e.target.value)}
             className="w-full rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -555,8 +655,7 @@ export default function Settings() {
             slashes, and starting from the mount point in docker-compose.yml, not the drive
             letter. E.g. Windows <code className="text-slate-400">V:\Download\Audio</code> is{" "}
             <code className="text-slate-400">/library/v/Download/Audio</code> (currently mounted:
-            J: → <code className="text-slate-400">/library/j</code>, V: →{" "}
-            <code className="text-slate-400">/library/v</code>).
+            V: → <code className="text-slate-400">/library/v</code>).
           </p>
           {error && <div className="text-sm text-red-400">{error}</div>}
           <button
@@ -572,6 +671,7 @@ export default function Settings() {
       <ConvertSection />
       <SyncSection />
       <CleanupSection />
+      <TrashSection />
     </div>
   );
 }

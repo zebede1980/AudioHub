@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useSession } from "./api/hooks/auth";
 import PlayerHost from "./player/PlayerHost";
 import MiniPlayer from "./components/MiniPlayer";
+import TranscriptionWatcher from "./components/TranscriptionWatcher";
 import NavBar from "./components/NavBar";
 import Login from "./routes/Login";
 import LibraryRoots from "./routes/LibraryRoots";
@@ -11,6 +12,7 @@ import Search from "./routes/Search";
 import Tags from "./routes/Tags";
 import PlayerScreen from "./routes/PlayerScreen";
 import Settings from "./routes/Settings";
+import FolderCleanupReview from "./routes/FolderCleanupReview";
 import ImportSoundgasm from "./routes/ImportSoundgasm";
 import History from "./routes/History";
 
@@ -78,6 +80,14 @@ export default function App() {
           }
         />
         <Route
+          path="/settings/cleanup/folders"
+          element={
+            <RequireAuth>
+              <FolderCleanupReview />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/history"
           element={
             <RequireAuth>
@@ -100,6 +110,7 @@ export default function App() {
           single persistent <audio> element and mini-player survive every navigation. */}
       <PlayerHost />
       <MiniPlayer />
+      <TranscriptionWatcher />
     </>
   );
 }

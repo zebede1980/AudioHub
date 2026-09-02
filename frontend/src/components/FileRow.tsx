@@ -1,5 +1,6 @@
 import RatingStars from "./RatingStars";
 import TagList from "./TagList";
+import TranscribeButton from "./TranscribeButton";
 import { fileCoverUrl } from "../api/client";
 import type { FileRow as FileRowType } from "../api/types";
 
@@ -77,6 +78,8 @@ export default function FileRow({
           📄
         </button>
       )}
+      {/* Renders nothing once a file has a transcript — the 📄 button above covers that case. */}
+      <TranscribeButton fileId={file.id} hasTranscript={file.hasTranscript} />
       {onEditTags && (
         <button onClick={onEditTags} title="Edit tags" className="flex-shrink-0 text-slate-400 hover:text-indigo-400">
           🏷️

@@ -8,7 +8,8 @@ import { resolveCoverAbsolutePath } from "../scanner/coverCache.js";
 import { tagsByFileId } from "../db/tagLookup.js";
 import { imageMimeTypeForExtension } from "../streaming/rangeStream.js";
 import { startScan } from "../scanner/scanManager.js";
-import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
+import { foldersForReview, folderContents } from "../trash/folderContents.js";
+import { moveFolderToTrash } from "../trash/trashManager.js";
 
 function parsePagination(query: Record<string, unknown>) {
   const page = Math.max(1, Number(query.page) || 1);
@@ -49,39 +50,58 @@ export default async function foldersRoutes(fastify: FastifyInstance) {
     reply.send(rows);
   });
 
-  // Permanently deletes every folder at a given star rating from disk, recursively. DB
-  // reconciliation is left to the scanner, same as /files/rated/:rating.
-  fastify.delete<{ Params: { rating: string } }>("/folders/rated/:rating", async (request, reply) => {
+  // Everything the delete-review screen needs to decide folder by folder: recursive file counts
+  // and sizes (folders.file_count only counts a folder's *direct* files, which badly understates
+  // what a recursive delete would take), plus the signals that flag a misclick — a highly rated
+  // file inside, a recent play, transcripts that took real time to generate.
+  fastify.get<{ Params: { rating: string } }>("/folders/rated/:rating/review", async (request, reply) => {
     const rating = Number(request.params.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       reply.code(400).send({ error: "rating must be an integer 1-5" });
       return;
     }
+    reply.send(foldersForReview(rating));
+  });
 
-    const rows = db
-      .select({
-        libraryRootId: folders.libraryRootId,
-        relativePath: folders.relativePath,
-        containerPath: libraryRoots.containerPath,
-      })
-      .from(folderRatings)
-      .innerJoin(folders, eq(folders.id, folderRatings.folderId))
-      .innerJoin(libraryRoots, eq(libraryRoots.id, folders.libraryRootId))
-      .where(eq(folderRatings.rating, rating))
-      .all();
+  // Flat, recursive listing of a folder's audio, so the review screen can expand a folder and let
+  // the user play anything inside it before committing to the delete.
+  fastify.get<{ Params: { id: string } }>("/folders/:id/contents", async (request, reply) => {
+    const id = Number(request.params.id);
+    const folder = db.select().from(folders).where(eq(folders.id, id)).get();
+    if (!folder) {
+      reply.code(404).send({ error: "not found" });
+      return;
+    }
+    reply.send(folderContents(id));
+  });
+
+  /**
+   * Moves an explicit list of folders to the trash. Deliberately takes ids rather than a star
+   * rating: the user confirms a specific set of folders on the review screen, and only those get
+   * deleted — a rating changed in another tab (or a folder rated 1 star between review and
+   * confirm) can no longer sweep something extra along with it.
+   */
+  fastify.post<{ Body: { folderIds?: unknown } }>("/folders/delete", async (request, reply) => {
+    const raw = request.body?.folderIds;
+    const folderIds = Array.isArray(raw) ? raw.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    if (folderIds.length === 0) {
+      reply.code(400).send({ error: "folderIds must be a non-empty array of folder ids" });
+      return;
+    }
 
     const touchedRoots = new Map<number, string>();
-    let deletedCount = 0;
-    for (const row of rows) {
-      if (!row.relativePath) continue; // never touch a library root itself
-      const absPath = path.join(row.containerPath, row.relativePath);
+    const deleted: { folderId: number; name: string; fileCount: number }[] = [];
+    const failed: { folderId: number; error: string }[] = [];
+
+    for (const folderId of folderIds) {
       try {
-        fs.rmSync(absPath, { recursive: true, force: true });
-        deletedCount++;
-        touchedRoots.set(row.libraryRootId, row.containerPath);
-        pruneEmptyAncestorDirs(path.dirname(absPath), row.containerPath);
+        const result = moveFolderToTrash(folderId);
+        deleted.push({ folderId, name: result.name, fileCount: result.fileCount });
+        touchedRoots.set(result.libraryRootId, result.containerPath);
       } catch (err) {
-        fastify.log.error({ err, absPath }, "failed to delete rated folder");
+        const message = err instanceof Error ? err.message : "failed to delete folder";
+        fastify.log.error({ err, folderId }, "failed to move folder to trash");
+        failed.push({ folderId, error: message });
       }
     }
 
@@ -89,7 +109,7 @@ export default async function foldersRoutes(fastify: FastifyInstance) {
       startScan(rootId, containerPath);
     }
 
-    reply.send({ deletedCount, total: rows.length });
+    reply.send({ deletedCount: deleted.length, total: folderIds.length, deleted, failed });
   });
 
   fastify.get<{ Params: { id: string }; Querystring: Record<string, string> }>(

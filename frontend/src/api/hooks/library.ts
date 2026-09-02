@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../client";
-import type { LibraryRoot, ScanStatus, FolderSummary, RatedFile, RatedFolder, RecentFile, RandomFile } from "../types";
+import type {
+  LibraryRoot,
+  ScanStatus,
+  FolderSummary,
+  RatedFile,
+  RatedFolder,
+  RecentFile,
+  RandomFile,
+  FolderReviewRow,
+  FolderContents,
+  FolderDeleteResult,
+} from "../types";
 
 export function useLibraryRoots() {
   return useQuery<LibraryRoot[]>({
@@ -100,16 +111,37 @@ export function useRatedFolders() {
   });
 }
 
-export function useDeleteRatedFolders() {
+/** The 1-star folders with recursive counts/sizes and the warning signals the review screen shows
+ * before anything is deleted. */
+export function useFoldersForReview(rating: number) {
+  return useQuery<FolderReviewRow[]>({
+    queryKey: ["folders-review", rating],
+    queryFn: () => api.get(`/folders/rated/${rating}/review`),
+  });
+}
+
+/** Recursive listing of one folder's audio — fetched only when a review row is expanded. */
+export function useFolderContents(folderId: number | undefined, enabled: boolean) {
+  return useQuery<FolderContents>({
+    queryKey: ["folder-contents", folderId],
+    queryFn: () => api.get(`/folders/${folderId}/contents`),
+    enabled: enabled && folderId !== undefined,
+  });
+}
+
+/** Deletes exactly the folders the user ticked (by id, never by rating) — see POST /folders/delete. */
+export function useDeleteFolders() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (rating: number) => api.delete<{ deletedCount: number; total: number }>(`/folders/rated/${rating}`),
+    mutationFn: (folderIds: number[]) => api.post<FolderDeleteResult>("/folders/delete", { folderIds }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rated-folders"] });
+      queryClient.invalidateQueries({ queryKey: ["folders-review"] });
       queryClient.invalidateQueries({ queryKey: ["rated-files"] });
       queryClient.invalidateQueries({ queryKey: ["folder"] });
       queryClient.invalidateQueries({ queryKey: ["root-folder"] });
       queryClient.invalidateQueries({ queryKey: ["search"] });
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
     },
   });
 }
