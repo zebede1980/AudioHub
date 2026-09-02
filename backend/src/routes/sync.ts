@@ -5,7 +5,15 @@ import { eq } from "drizzle-orm";
 import { db, rawDb } from "../db/client.js";
 import { syncConfig } from "../db/schema.js";
 import { startSyncPush, getSyncJob, getSyncConfigRow } from "../sync/pushManager.js";
-import { getSyncConfig, listManifest, ingestUpload, ingestDelete, type SyncUploadMeta } from "../sync/ingestManager.js";
+import {
+  getSyncConfig,
+  listManifest,
+  ingestUpload,
+  ingestMetadata,
+  ingestDelete,
+  type SyncUploadMeta,
+  type SyncMetadataPayload,
+} from "../sync/ingestManager.js";
 
 function ensureConfigRow(): void {
   rawDb.prepare("INSERT OR IGNORE INTO sync_config (id, min_rating, updated_at) VALUES (1, 4, ?)").run(Date.now());
@@ -136,6 +144,26 @@ export default async function syncRoutes(fastify: FastifyInstance) {
       } catch (err) {
         reply.code(500).send({ error: err instanceof Error ? err.message : "upload failed" });
       }
+    }
+  );
+
+  fastify.put<{ Params: { contentHash: string }; Body: SyncMetadataPayload }>(
+    "/sync/metadata/:contentHash",
+    { preHandler: requireSyncApiKey },
+    async (request, reply) => {
+      const payload = request.body ?? { rating: 0, tags: [], transcript: null };
+      const result = ingestMetadata(request.params.contentHash, payload);
+      if (result === "not-found") {
+        reply.code(404).send({ error: "no upload found for this content hash" });
+        return;
+      }
+      if (result === "not-scanned") {
+        // 425 Too Early — the file was pushed but the library rescan it triggered hasn't caught
+        // up yet. The pusher is expected to retry after a short delay.
+        reply.code(425).send({ error: "uploaded but not scanned into the library yet — retry shortly" });
+        return;
+      }
+      reply.send({ ok: true });
     }
   );
 

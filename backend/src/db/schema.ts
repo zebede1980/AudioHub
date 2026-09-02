@@ -186,6 +186,10 @@ export const syncedFiles = sqliteTable("synced_files", {
   fileId: integer("file_id").references(() => files.id, { onDelete: "set null" }),
   contentHash: text("content_hash").notNull().unique(),
   relativePath: text("relative_path").notNull(),
+  // Hash of {rating, tags, transcript text} at last successful push — lets a sync run detect
+  // "audio unchanged but rating/tags/transcript were edited since" without re-fingerprinting the
+  // whole file or unconditionally re-sending metadata for every already-synced file every run.
+  metadataHash: text("metadata_hash"),
   status: text("status").notNull(), // 'synced' | 'error'
   lastError: text("last_error"),
   syncedAt: integer("synced_at").notNull(),

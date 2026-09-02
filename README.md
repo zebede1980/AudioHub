@@ -41,11 +41,15 @@ hardware behind your own reverse proxy.
   history, and playback position all carry over onto the converted file.
 
 **Cloud sync**
-- Push your 4- and 5-star files to a second AudioHub instance — e.g. a small cloud box with far
-  less storage than your main library, so it only ever holds your favorites.
+- Push your top-rated files (3+, 4+, or 5-only, your choice) to a second AudioHub instance — e.g.
+  a small cloud box with far less storage than your main library, so it only ever holds your
+  favorites.
+- Ratings, tags, and transcripts travel with the file, not just the audio — the remote copy is a
+  real match, not a bare file dump.
 - API-key authenticated (not your login), diffed by content hash against what the remote already
-  has so a re-run only transfers what's actually new, and automatically removes the remote copy if
-  a file drops below the rating threshold or is deleted locally.
+  has so a re-run only transfers audio that's actually new (rating/tag/transcript edits are cheap
+  to re-send and always kept in sync), and automatically removes the remote copy if a file drops
+  below the rating threshold or is deleted locally.
 - Configured entirely through each instance's own Settings page — no shared config files or
   environment variables to keep in sync between machines.
 

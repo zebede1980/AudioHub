@@ -401,6 +401,7 @@ function SyncSection() {
               onChange={(e) => setMinRating(Number(e.target.value))}
               className="rounded bg-slate-800 px-2 py-1 text-sm text-slate-200"
             >
+              <option value={3}>3+ stars</option>
               <option value={4}>4+ stars</option>
               <option value={5}>5 stars only</option>
             </select>

@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import { eq } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { syncConfig, syncReceipts, libraryRoots } from "../db/schema.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { db, rawDb } from "../db/client.js";
+import { syncConfig, syncReceipts, libraryRoots, files, ratings, tags, fileTags, transcripts } from "../db/schema.js";
 import { sanitizeForFilesystem } from "../scraper/downloadManager.js";
 import { startScan } from "../scanner/scanManager.js";
 import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
@@ -13,6 +13,12 @@ export interface SyncUploadMeta {
   contentHash: string;
   filename: string;
   folderPath?: string;
+}
+
+export interface SyncMetadataPayload {
+  rating: number;
+  tags: string[];
+  transcript: { text: string; language: string | null; model: string } | null;
 }
 
 export function getSyncConfig() {
@@ -83,6 +89,67 @@ export async function ingestUpload(meta: SyncUploadMeta, body: Readable): Promis
   }
 
   startScan(rootId, containerPath);
+}
+
+/**
+ * Applies rating/tags/transcript to the file behind a content hash. Returns "not-scanned" when
+ * the receipt exists but the library scan the upload triggered hasn't caught up yet (the caller
+ * is expected to retry) — distinct from "not-found", which means no such push ever happened.
+ */
+export function ingestMetadata(contentHash: string, payload: SyncMetadataPayload): "ok" | "not-scanned" | "not-found" {
+  const receipt = db.select().from(syncReceipts).where(eq(syncReceipts.contentHash, contentHash)).get();
+  if (!receipt) return "not-found";
+
+  const file = db
+    .select({ id: files.id })
+    .from(files)
+    .where(
+      and(eq(files.libraryRootId, receipt.libraryRootId), eq(files.relativePath, receipt.relativePath), isNull(files.deletedAt))
+    )
+    .get();
+  if (!file) return "not-scanned";
+
+  if (payload.rating >= 1 && payload.rating <= 5) {
+    db.insert(ratings)
+      .values({ fileId: file.id, rating: payload.rating, ratedAt: Date.now() })
+      .onConflictDoUpdate({ target: ratings.fileId, set: { rating: payload.rating, ratedAt: Date.now() } })
+      .run();
+  }
+
+  // Tags: find-or-create each by name, then replace the file's tag set wholesale — same
+  // find-or-create + replace pattern as the app's own PUT /files/:id/tags.
+  const tagIds: number[] = [];
+  for (const name of payload.tags) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    db.insert(tags).values({ name: trimmed, createdAt: Date.now() }).onConflictDoNothing().run();
+    const tag = db.select({ id: tags.id }).from(tags).where(eq(tags.name, trimmed)).get();
+    if (tag) tagIds.push(tag.id);
+  }
+  rawDb.transaction(() => {
+    db.delete(fileTags).where(eq(fileTags.fileId, file.id)).run();
+    for (const tagId of tagIds) {
+      db.insert(fileTags).values({ fileId: file.id, tagId }).onConflictDoNothing().run();
+    }
+  })();
+
+  if (payload.transcript) {
+    db.insert(transcripts)
+      .values({
+        fileId: file.id,
+        text: payload.transcript.text,
+        language: payload.transcript.language,
+        model: payload.transcript.model,
+        createdAt: Date.now(),
+      })
+      .onConflictDoUpdate({
+        target: transcripts.fileId,
+        set: { text: payload.transcript.text, language: payload.transcript.language, model: payload.transcript.model },
+      })
+      .run();
+  }
+
+  return "ok";
 }
 
 /** Idempotent: a contentHash with no matching receipt is treated as already-deleted, not an error. */

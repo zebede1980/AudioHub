@@ -1,6 +1,7 @@
 ##
 ## Example compose file for a cloud/remote AudioHub instance — the sync target that a local
-## AudioHub pushes its 4/5-star files to (see the "Cloud sync" section in Settings).
+## AudioHub pushes its top-rated files to (see the "Cloud sync" section in Settings — the rating
+## threshold is configurable, 3+/4+/5-only).
 ##
 ## Differences from the main docker-compose.yml (which is written for the machine that owns the
 ## real library and builds its own image):
