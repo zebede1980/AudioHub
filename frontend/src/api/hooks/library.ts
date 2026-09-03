@@ -101,6 +101,11 @@ export function useRandomFiles(limit: number, includeRated: boolean) {
   return useQuery<RandomFile[]>({
     queryKey: randomFilesQueryKey(limit, includeRated),
     queryFn: () => api.get(`/files/random?limit=${limit}&includeRated=${includeRated}`),
+    // Never refetched on its own. Leaving the Random tab and coming back — via the player, via
+    // the back button — remounts this query, and with the default staleTime of 0 that would
+    // reshuffle the batch the user was working through. Only the explicit "New batch" button
+    // (refetch) draws a new set.
+    staleTime: Infinity,
   });
 }
 

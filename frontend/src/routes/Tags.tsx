@@ -7,13 +7,18 @@ import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
+import { useUrlEnum, useUrlNumberList } from "../utils/urlState";
 import type { FileDetail, FileRow as FileRowType } from "../api/types";
+
+/** ?tags=3,7&match=any — the selection is the whole point of this screen, so it has to survive
+ * playing something and coming back. */
+const MATCH_MODES = ["all", "any"] as const;
 
 export default function Tags() {
   const { data: tags, isLoading } = useTags();
   const deleteTag = useDeleteTag();
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [mode, setMode] = useState<"all" | "any">("all");
+  const [selectedIds, setSelectedIds] = useUrlNumberList("tags");
+  const [mode, setMode] = useUrlEnum("match", MATCH_MODES, "all");
   const { data, isLoading: tracksLoading } = useTracksByTags(selectedIds, mode);
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
@@ -23,14 +28,14 @@ export default function Tags() {
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
   function toggleTag(id: number) {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+    setSelectedIds(selectedIds.includes(id) ? selectedIds.filter((t) => t !== id) : [...selectedIds, id]);
   }
 
   function onDeleteTag(e: React.MouseEvent, id: number, name: string) {
     e.stopPropagation();
     if (confirm(`Delete the tag "${name}"? It will be removed from every track.`)) {
       deleteTag.mutate(id);
-      setSelectedIds((prev) => prev.filter((t) => t !== id));
+      setSelectedIds(selectedIds.filter((t) => t !== id));
     }
   }
 
@@ -40,7 +45,7 @@ export default function Tags() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 pb-24">
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
       <h1 className="text-lg font-semibold">Tags</h1>
 
       {isLoading && <div className="text-slate-400">Loading tags…</div>}
@@ -81,7 +86,7 @@ export default function Tags() {
           <span>Match</span>
           <select
             value={mode}
-            onChange={(e) => setMode(e.target.value as "all" | "any")}
+            onChange={(e) => setMode(e.target.value as (typeof MATCH_MODES)[number])}
             className="rounded bg-slate-800 px-2 py-1 text-xs"
           >
             <option value="all">all selected tags</option>

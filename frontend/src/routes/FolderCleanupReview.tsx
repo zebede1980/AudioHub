@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useFoldersForReview, useFolderContents, useDeleteFolders } from "../api/hooks/library";
 import { useClearFolderRating } from "../api/hooks/ratings";
 import { api, folderCoverUrl } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
 import RatingStars from "../components/RatingStars";
+import { useGoBack } from "../utils/navigation";
 import type { FileDetail, FolderReviewRow } from "../api/types";
 
 /** Which folders are ticked survives a trip to the player screen and back — reviewing a big
@@ -125,7 +126,7 @@ function FolderContentsList({ folderId }: { folderId: number }) {
 }
 
 export default function FolderCleanupReview() {
-  const navigate = useNavigate();
+  const goBack = useGoBack("/settings");
   const { data: folders, isLoading } = useFoldersForReview(1);
   const deleteFolders = useDeleteFolders();
   const clearFolderRating = useClearFolderRating();
@@ -205,7 +206,7 @@ export default function FolderCleanupReview() {
   return (
     <div className={`mx-auto max-w-2xl space-y-4 p-4 ${hasMiniPlayer ? "pb-56" : "pb-40"}`}>
       <div>
-        <button onClick={() => navigate("/settings")} className="text-xs text-slate-400 hover:text-indigo-400">
+        <button onClick={goBack} className="text-xs text-slate-400 hover:text-indigo-400">
           ← Settings
         </button>
         <h1 className="mt-1 text-lg font-semibold">Review 1-star folders</h1>

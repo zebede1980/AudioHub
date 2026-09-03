@@ -25,7 +25,7 @@ export default function History() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 pb-24">
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">History</h1>
         {data && data.length > 0 && (

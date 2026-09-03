@@ -6,6 +6,7 @@ import RatingStars from "../components/RatingStars";
 import TagEditor from "../components/TagEditor";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import { useFileTags } from "../api/hooks/tags";
+import { useGoBack } from "../utils/navigation";
 import {
   useTranscript,
   useTranscribeFile,
@@ -127,6 +128,10 @@ function formatTime(sec: number): string {
 
 export default function PlayerScreen() {
   const navigate = useNavigate();
+  // Returns to whatever you were looking at — the Library tab and rating filter you had open,
+  // the folder page you were on, your place in that list. Falls back to the library only when
+  // the player is genuinely the first screen of the session (deep link or reload).
+  const goBack = useGoBack("/library");
   const currentFile = usePlayerStore((s) => s.currentFile);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const currentTime = usePlayerStore((s) => s.currentTime);
@@ -158,7 +163,7 @@ export default function PlayerScreen() {
 
   return (
     <div className="mx-auto flex max-w-md flex-col items-center gap-6 p-6">
-      <button onClick={() => navigate(-1)} className="self-start text-slate-400">
+      <button onClick={goBack} className="self-start text-slate-400">
         ← Back
       </button>
 

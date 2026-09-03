@@ -10,7 +10,13 @@ import FileRow from "../components/FileRow";
 import RatingStars from "../components/RatingStars";
 import TranscriptModal from "../components/TranscriptModal";
 import TagEditor from "../components/TagEditor";
+import { useUrlEnum, useUrlNumber } from "../utils/urlState";
 import type { FileDetail } from "../api/types";
+
+/** Sort orders and the page number live in the URL, so a folder you have paged and re-sorted is
+ * still in that state when you come back to it from the player or with the back button. */
+const FILE_SORTS = ["track", "title", "duration", "rating"] as const;
+const FOLDER_SORTS = ["name", "fileCount"] as const;
 
 function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; fileIds: number[] }) {
   const transcribeFolder = useTranscribeFolder();
@@ -61,9 +67,10 @@ function TranscribeFolderControl({ folderId, fileIds }: { folderId: number; file
 export default function FolderBrowser() {
   const { folderId } = useParams<{ folderId: string }>();
   const id = folderId ? Number(folderId) : undefined;
-  const [page, setPage] = useState(1);
-  const [sort, setSort] = useState("track");
-  const [folderSort, setFolderSort] = useState("name");
+  const [pageParam, setPage] = useUrlNumber("page", 1);
+  const page = pageParam && pageParam >= 1 ? pageParam : 1;
+  const [sort, setSort] = useUrlEnum("sort", FILE_SORTS, "track");
+  const [folderSort, setFolderSort] = useUrlEnum("fsort", FOLDER_SORTS, "name");
   const { data, isLoading, isError } = useFolder(id, { sort, page, folderSort });
   const setRating = useSetRating();
   const clearRating = useClearRating();
@@ -86,7 +93,7 @@ export default function FolderBrowser() {
   const hasMore = files.length === data.pageSize;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24">
+    <div className="mx-auto max-w-3xl space-y-4 p-4">
       <nav className="flex flex-wrap items-center gap-1 text-sm text-slate-400">
         {breadcrumb.map((crumb, i) => (
           <span key={crumb.id} className="flex items-center gap-1">
@@ -113,7 +120,7 @@ export default function FolderBrowser() {
         <div className="flex items-center justify-end">
           <select
             value={folderSort}
-            onChange={(e) => setFolderSort(e.target.value)}
+            onChange={(e) => setFolderSort(e.target.value as (typeof FOLDER_SORTS)[number])}
             className="rounded bg-slate-800 px-2 py-1 text-xs"
           >
             <option value="name">A–Z</option>
@@ -139,7 +146,7 @@ export default function FolderBrowser() {
               <select
                 value={sort}
                 onChange={(e) => {
-                  setSort(e.target.value);
+                  setSort(e.target.value as (typeof FILE_SORTS)[number]);
                   setPage(1);
                 }}
                 className="rounded bg-slate-800 px-2 py-1 text-xs"
@@ -169,7 +176,7 @@ export default function FolderBrowser() {
             <div className="mt-3 flex justify-center gap-3 text-sm">
               <button
                 disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
+                onClick={() => setPage(page - 1)}
                 className="rounded bg-slate-800 px-3 py-1 disabled:opacity-30"
               >
                 ← Prev
@@ -177,7 +184,7 @@ export default function FolderBrowser() {
               <span className="text-slate-500">Page {page}</span>
               <button
                 disabled={!hasMore}
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => setPage(page + 1)}
                 className="rounded bg-slate-800 px-3 py-1 disabled:opacity-30"
               >
                 Next →

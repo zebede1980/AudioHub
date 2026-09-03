@@ -2,8 +2,17 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { usePlayerStore } from "../player/usePlayerStore";
 import { fileCoverUrl } from "../api/client";
 
-export default function MiniPlayer() {
+/** Whether the mini player is currently occupying the bottom of the screen. Exported because the
+ * routed content has to reserve room for it — it is fixed-position, so it sits on top of the last
+ * row of a list unless something pads the page out by its height. */
+export function useMiniPlayerVisible(): boolean {
   const location = useLocation();
+  const currentFile = usePlayerStore((s) => s.currentFile);
+  return currentFile !== null && location.pathname !== "/player";
+}
+
+export default function MiniPlayer() {
+  const visible = useMiniPlayerVisible();
   const navigate = useNavigate();
   const currentFile = usePlayerStore((s) => s.currentFile);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
@@ -12,7 +21,7 @@ export default function MiniPlayer() {
   const currentTime = usePlayerStore((s) => s.currentTime);
   const duration = usePlayerStore((s) => s.duration);
 
-  if (!currentFile || location.pathname === "/player") return null;
+  if (!visible || !currentFile) return null;
 
   const subtitle = currentFile.parsedAuthor ?? currentFile.parsedSeriesOrBook ?? "";
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;

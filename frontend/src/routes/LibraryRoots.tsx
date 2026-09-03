@@ -15,9 +15,15 @@ import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
+import { useUrlBool, useUrlEnum, useUrlNumber } from "../utils/urlState";
 import type { LibraryRoot, FileDetail, FileRow as FileRowType, RandomFile } from "../api/types";
 
 const RANDOM_BATCH_SIZE = 10;
+
+/** Which list the Library home is showing, held in the URL as ?tab= so that leaving the screen
+ * and coming back — the player's ← Back, the browser back button, a reload — returns to the same
+ * tab instead of dumping you at the top-level folder list. */
+const LIBRARY_TABS = ["folders", "rated", "recent", "random"] as const;
 
 function LibraryRootCard({ root }: { root: LibraryRoot }) {
   const { data: rootFolder, isError } = useRootFolder(root.id);
@@ -54,12 +60,11 @@ function LibraryRootCard({ root }: { root: LibraryRoot }) {
 
 /** null = the default view: everything rated, highest first. A number = only that star rating,
  * which is how a 1-star pile gets reviewed before deletion and how a "2 star = look at this
- * later" pot gets found again. */
-type RatingFilter = number | null;
-
+ * later" pot gets found again. Kept in the URL (?stars=2) so the pile you are working through is
+ * still there when you come back from the player. */
 function RatedFilesList() {
   const { data, isLoading } = useRatedFiles();
-  const [filter, setFilter] = useState<RatingFilter>(null);
+  const [filter, setFilter] = useUrlNumber("stars");
   const setRating = useSetRating();
   const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
@@ -254,7 +259,7 @@ function RecentFilesList() {
 
 function RandomFilesList() {
   const queryClient = useQueryClient();
-  const [includeRated, setIncludeRated] = useState(false);
+  const [includeRated, setIncludeRated] = useUrlBool("rated");
   const { data, isLoading, isFetching, refetch } = useRandomFiles(RANDOM_BATCH_SIZE, includeRated);
   const setRating = useSetRating();
   const clearRating = useClearRating();
@@ -363,7 +368,7 @@ function RandomFilesList() {
 
 export default function LibraryRoots() {
   const { data: roots, isLoading } = useLibraryRoots();
-  const [mode, setMode] = useState<"folders" | "rated" | "recent" | "random">("folders");
+  const [mode, setMode] = useUrlEnum("tab", LIBRARY_TABS, "folders");
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 

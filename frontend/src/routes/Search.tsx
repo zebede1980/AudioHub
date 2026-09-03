@@ -12,12 +12,25 @@ import TranscriptModal from "../components/TranscriptModal";
 import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
 export default function Search() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const [q, setQ] = useState(urlQuery);
   // Re-syncs when the navbar search box sends a new ?q= while already on this route — React
   // Router reuses this component instance rather than remounting it for a same-route navigation.
   useEffect(() => setQ(urlQuery), [urlQuery]);
+  // …and mirrors what is typed here back into ?q=, so leaving for the player and coming back
+  // (or reloading) returns to these results instead of an empty search box. Debounced because
+  // this rewrites the current history entry, and replacing it on every keystroke is wasteful.
+  useEffect(() => {
+    if (q === urlQuery) return;
+    const timer = setTimeout(() => {
+      const next = new URLSearchParams(window.location.search);
+      if (q === "") next.delete("q");
+      else next.set("q", q);
+      setSearchParams(next, { replace: true });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, urlQuery, setSearchParams]);
   const { data, isLoading } = useSearch(q);
   const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
@@ -35,7 +48,7 @@ export default function Search() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 pb-24">
+    <div className="mx-auto max-w-2xl space-y-4 p-4">
       <input
         type="search"
         autoFocus

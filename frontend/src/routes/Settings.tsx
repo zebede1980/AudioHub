@@ -619,7 +619,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-4 pb-24">
+    <div className="mx-auto max-w-2xl space-y-6 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Settings</h1>
         <button onClick={() => logout.mutate()} className="text-sm text-slate-400 underline">

@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
     "composite": true,
+    // A composite project must emit, so send the output somewhere harmless. Left at the default
+    // it lands beside the source as vite.config.js — and Vite resolves .js ahead of .ts, so the
+    // build would silently start using a stale compiled copy of its own config.
+    "outDir": "./node_modules/.tmp/tsconfig-node",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
