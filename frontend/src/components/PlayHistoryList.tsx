@@ -4,12 +4,17 @@ import { usePlayHistory, useClearPlayHistory } from "../api/hooks/history";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
-import FileRow from "../components/FileRow";
-import TagEditor from "../components/TagEditor";
-import TranscriptModal from "../components/TranscriptModal";
+import FileRow from "./FileRow";
+import TagEditor from "./TagEditor";
+import TranscriptModal from "./TranscriptModal";
 import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
-export default function History() {
+/**
+ * The Library home's History tab. Lives here rather than beside its sibling lists in
+ * LibraryRoots.tsx because it is the only one with its own action (Clear) and modals to carry;
+ * folding it in would have pushed that file past readable.
+ */
+export default function PlayHistoryList() {
   const { data, isLoading } = usePlayHistory();
   const clear = useClearPlayHistory();
   const setRating = useSetRating();
@@ -24,27 +29,32 @@ export default function History() {
     play(file);
   }
 
+  if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
+        Nothing played yet.
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">History</h1>
-        {data && data.length > 0 && (
-          <button
-            onClick={() => {
-              if (confirm("Clear your entire play history?")) clear.mutate();
-            }}
-            disabled={clear.isPending}
-            className="rounded bg-slate-800 px-3 py-1 text-sm disabled:opacity-50"
-          >
-            Clear
-          </button>
-        )}
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <button
+          onClick={() => {
+            if (confirm("Clear your entire play history?")) clear.mutate();
+          }}
+          disabled={clear.isPending}
+          className="rounded bg-slate-800 px-3 py-1 text-xs text-slate-300 disabled:opacity-50"
+        >
+          Clear history
+        </button>
       </div>
 
-      {isLoading && <div className="text-slate-400">Loading…</div>}
-
       <div className="space-y-1">
-        {data?.map((entry) => {
+        {data.map((entry) => {
           const file: FileRowType = {
             id: entry.fileId,
             filename: entry.filename,
@@ -83,10 +93,6 @@ export default function History() {
           );
         })}
       </div>
-
-      {!isLoading && data?.length === 0 && (
-        <div className="p-6 text-center text-slate-500">Nothing played yet.</div>
-      )}
 
       {viewingTranscriptFileId !== null && (
         <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />

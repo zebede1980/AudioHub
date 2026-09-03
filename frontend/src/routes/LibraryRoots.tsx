@@ -15,6 +15,7 @@ import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
+import PlayHistoryList from "../components/PlayHistoryList";
 import { useUrlBool, useUrlEnum, useUrlNumber } from "../utils/urlState";
 import type { LibraryRoot, FileDetail, FileRow as FileRowType, RandomFile } from "../api/types";
 
@@ -23,7 +24,7 @@ const RANDOM_BATCH_SIZE = 10;
 /** Which list the Library home is showing, held in the URL as ?tab= so that leaving the screen
  * and coming back — the player's ← Back, the browser back button, a reload — returns to the same
  * tab instead of dumping you at the top-level folder list. */
-const LIBRARY_TABS = ["folders", "rated", "recent", "random"] as const;
+const LIBRARY_TABS = ["folders", "rated", "recent", "random", "history"] as const;
 
 function LibraryRootCard({ root }: { root: LibraryRoot }) {
   const { data: rootFolder, isError } = useRootFolder(root.id);
@@ -381,7 +382,8 @@ export default function LibraryRoots() {
         </Link>
       </div>
 
-      <div className="flex gap-1">
+      {/* Wraps rather than overflowing: five tabs including "Recently Added" don't fit one phone row. */}
+      <div className="flex flex-wrap gap-1">
         <button
           onClick={() => setMode("folders")}
           className={`rounded px-3 py-1 text-sm ${mode === "folders" ? "bg-slate-800 text-white" : "text-slate-400"}`}
@@ -406,6 +408,12 @@ export default function LibraryRoots() {
         >
           Random
         </button>
+        <button
+          onClick={() => setMode("history")}
+          className={`rounded px-3 py-1 text-sm ${mode === "history" ? "bg-slate-800 text-white" : "text-slate-400"}`}
+        >
+          History
+        </button>
       </div>
 
       {mode === "rated" ? (
@@ -414,6 +422,8 @@ export default function LibraryRoots() {
         <RecentFilesList />
       ) : mode === "random" ? (
         <RandomFilesList />
+      ) : mode === "history" ? (
+        <PlayHistoryList />
       ) : !roots || roots.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
           No library folders added yet.{" "}

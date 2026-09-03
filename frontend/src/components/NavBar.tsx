@@ -32,9 +32,6 @@ export default function NavBar() {
         <NavLink to="/tags" className={linkClass}>
           Tags
         </NavLink>
-        <NavLink to="/history" className={linkClass}>
-          History
-        </NavLink>
         <NavLink to="/import/soundgasm" className={linkClass}>
           Import
         </NavLink>

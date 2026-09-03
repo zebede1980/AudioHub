@@ -15,7 +15,6 @@ import PlayerScreen from "./routes/PlayerScreen";
 import Settings from "./routes/Settings";
 import FolderCleanupReview from "./routes/FolderCleanupReview";
 import ImportSoundgasm from "./routes/ImportSoundgasm";
-import History from "./routes/History";
 
 function RequireAuth({ children }: { children: ReactElement }) {
   const { data: session, isLoading } = useSession();
@@ -97,14 +96,8 @@ export default function App() {
               </RequireAuth>
             }
           />
-          <Route
-            path="/history"
-            element={
-              <RequireAuth>
-                <History />
-              </RequireAuth>
-            }
-          />
+          {/* History moved into the Library home as a tab; keep the old URL working. */}
+          <Route path="/history" element={<Navigate to="/library?tab=history" replace />} />
           <Route
             path="/import/soundgasm"
             element={
