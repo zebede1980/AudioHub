@@ -71,7 +71,9 @@ hardware behind your own reverse proxy.
   migrations applied automatically on boot.
 - **Frontend**: React + TypeScript, Vite, Tailwind, TanStack Query, installable as a PWA.
 - **Runtime**: a single Docker image serving both — Fastify serves the built frontend and the API
-  from one process. `docker-publish.yml` also publishes it to GHCR on every push to `main`.
+  from one process. Each host builds that image from this repo; `docker-publish.yml` can also
+  publish it to GHCR for hosts that would rather pull than build, but it is manual-only (run it
+  from the Actions tab) rather than firing on every push.
 
 ## Installation
 
@@ -137,8 +139,11 @@ within the app itself, no further file or environment editing required.
 `docker-compose.cloud.yml` is an example for a *remote* instance — it pulls a prebuilt image from
 GitHub Container Registry instead of building from source, and expects a much smaller local
 `./library` volume (synced content only, not your whole collection). See the comments at the top of
-that file for first-time setup, including making the published GHCR image pullable (it's private by
-default) and an example nginx/Nginx Proxy Manager configuration.
+that file for first-time setup, including publishing that image (the workflow is manual) and making
+it pullable (the GHCR package is private by default), plus an example nginx/Nginx Proxy Manager
+configuration. A remote host can equally build from source instead, using the `build:` block from
+`docker-compose.yml` in place of the `image:` line — which is what avoids depending on the
+registry at all.
 
 Once both instances are running, configure the sync relationship from each one's own **Settings →
 Cloud sync** section — generate an API key on the receiving (cloud) side, then paste that key and

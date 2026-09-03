@@ -5,13 +5,18 @@
 ##
 ## Differences from the main docker-compose.yml (which is written for the machine that owns the
 ## real library and builds its own image):
-##   - Pulls a prebuilt image from GHCR instead of building from source, published by
-##     .github/workflows/docker-publish.yml on every push to main.
+##   - Pulls a prebuilt image from GHCR instead of building from source. That image is published
+##     by .github/workflows/docker-publish.yml, which is manual-only — run it from the repo's
+##     Actions tab before pulling here, or :latest will be whatever was published last. The
+##     alternative, if you would rather not depend on that at all, is to copy this file, swap the
+##     `image:` line for the `build:` block from docker-compose.yml, and let the remote host
+##     compile its own image from a checkout of the repo.
 ##   - One writable ./library volume instead of mounting whole drives — the cloud box doesn't
 ##     hold the full library, only what gets synced in under library/Synced/...
 ##
 ## First-time setup:
-##   1. Push to main once so the publish workflow runs, then make the GHCR package public
+##   1. Run the publish workflow once (Actions tab -> "Build and publish Docker image" -> Run
+##      workflow), then make the GHCR package public
 ##      (repo -> Packages -> audiohub -> Package settings -> Change visibility), or `docker
 ##      login ghcr.io` on this host with a PAT that has `read:packages` — otherwise `pull` below
 ##      will fail with "unauthorized".

@@ -1,12 +1,17 @@
 name: Build and publish Docker image
 
 # Builds the AudioHub image from backend/Dockerfile and publishes it to GitHub Container
-# Registry, so a cloud deployment can just `docker compose pull` instead of building from
-# source. See docker-compose.cloud.yml for an example that consumes this image.
+# Registry, so a deployment can `docker compose pull` instead of building from source. See
+# docker-compose.cloud.yml for an example that consumes this image.
+#
+# Deliberately manual — no push trigger. Every machine running AudioHub today builds its own
+# image from this repo (the local one via docker-compose.yml, the cloud one via an equivalent
+# build-from-source compose file on that host), so nothing pulls the published image, and a run
+# on every push to main spent ~17 minutes cross-building linux/arm64 under QEMU emulation to
+# produce an artifact no one used. Run it from the Actions tab -> this workflow -> "Run
+# workflow" when a host actually wants a prebuilt image rather than compiling whisper.cpp
+# itself. Dispatched from main it publishes :latest and :sha-<short>.
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   workflow_dispatch: {}
 
 env:
