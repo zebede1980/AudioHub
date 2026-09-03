@@ -7,6 +7,11 @@ export interface SoundgasmPost {
   postUrl: string;
 }
 
+/** The canonical profile page for an uploader — what an imported folder records as its source. */
+export function profileUrlFor(username: string): string {
+  return `https://${SOUNDGASM_HOST}/u/${username}`;
+}
+
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))

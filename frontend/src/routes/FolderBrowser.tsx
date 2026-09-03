@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useFolder } from "../api/hooks/folder";
+import { useFolder, useUploadToFolder, type MergeResult } from "../api/hooks/folder";
+import MergeFolderModal from "../components/MergeFolderModal";
+import FolderSourceLink from "../components/FolderSourceLink";
 import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
 import { useTranscribeFolder, useTranscriptionStatus, useCancelTranscription } from "../api/hooks/transcribe";
 import { api } from "../api/client";
@@ -80,10 +82,42 @@ export default function FolderBrowser() {
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const upload = useUploadToFolder(id);
 
   async function playFile(fileId: number) {
     const file = await api.get<FileDetail>(`/files/${fileId}`);
     play(file);
+  }
+
+  function uploadFiles(picked: FileList | null) {
+    if (!picked?.length) return;
+    setNotice(null);
+    // One at a time: each upload streams a whole audio file, and the server indexes it before
+    // answering, so firing a folder's worth in parallel just queues them behind each other anyway.
+    void (async () => {
+      const added: string[] = [];
+      for (const file of Array.from(picked)) {
+        try {
+          const result = await upload.mutateAsync(file);
+          added.push(result.renamed ? `${file.name} → ${result.filename}` : result.filename);
+        } catch (err) {
+          setNotice(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+          return;
+        }
+      }
+      setNotice(`Added ${added.length} file${added.length === 1 ? "" : "s"}: ${added.join(", ")}`);
+    })();
+  }
+
+  function onMerged(result: MergeResult) {
+    setIsMerging(false);
+    const parts = [`${result.movedFiles} file${result.movedFiles === 1 ? "" : "s"}`];
+    if (result.movedSubfolders > 0) parts.push(`${result.movedSubfolders} subfolder${result.movedSubfolders === 1 ? "" : "s"}`);
+    const renamed = result.renamed.length > 0 ? ` ${result.renamed.length} renamed to avoid overwriting.` : "";
+    setNotice(`Merged in ${parts.join(" and ")}.${renamed}`);
   }
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
@@ -106,14 +140,49 @@ export default function FolderBrowser() {
       </nav>
 
       {folder.relativePath !== "" && (
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">{folder.name}</h1>
-          <RatingStars
-            value={folder.rating}
-            onChange={(rating) => setFolderRating.mutate({ folderId: folder.id, rating })}
-            onClear={() => clearFolderRating.mutate(folder.id)}
-          />
-        </div>
+        <>
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-semibold">{folder.name}</h1>
+            <RatingStars
+              value={folder.rating}
+              onChange={(rating) => setFolderRating.mutate({ folderId: folder.id, rating })}
+              onClear={() => clearFolderRating.mutate(folder.id)}
+            />
+          </div>
+
+          <FolderSourceLink folderId={folder.id} sourceUrl={folder.sourceUrl} />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,.mp3,.m4a,.m4b,.flac,.wav,.ogg,.opus,.aac,.wma"
+              multiple
+              hidden
+              onChange={(e) => {
+                uploadFiles(e.target.files);
+                e.target.value = ""; // so picking the same file again still fires a change
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={upload.isPending}
+              className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
+            >
+              {upload.isPending ? "Uploading…" : "Upload audio"}
+            </button>
+            <button
+              onClick={() => {
+                setNotice(null);
+                setIsMerging(true);
+              }}
+              className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300"
+            >
+              Merge a folder in…
+            </button>
+            {notice && <span className="text-xs text-slate-400">{notice}</span>}
+          </div>
+        </>
       )}
 
       {subfolders.length > 0 && (
@@ -203,6 +272,14 @@ export default function FolderBrowser() {
       )}
       {editingTagsFileId !== null && (
         <TagEditor fileId={editingTagsFileId} onClose={() => setEditingTagsFileId(null)} />
+      )}
+      {isMerging && (
+        <MergeFolderModal
+          targetFolderId={folder.id}
+          targetName={folder.name}
+          onClose={() => setIsMerging(false)}
+          onMerged={onMerged}
+        />
       )}
     </div>
   );

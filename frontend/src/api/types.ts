@@ -28,6 +28,8 @@ export interface FolderSummary {
   totalDurationSec: number | null;
   lastSeenAt: number;
   rating: number | null;
+  /** Where the folder's contents came from — set automatically by the Soundgasm importer. */
+  sourceUrl: string | null;
 }
 
 export interface FileRow {

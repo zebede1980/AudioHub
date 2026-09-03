@@ -5,8 +5,8 @@ import type { Readable } from "node:stream";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, rawDb } from "../db/client.js";
 import { syncConfig, syncReceipts, libraryRoots, files, ratings, tags, fileTags, transcripts } from "../db/schema.js";
-import { sanitizeForFilesystem } from "../scraper/downloadManager.js";
-import { startScan } from "../scanner/scanManager.js";
+import { sanitizeForFilesystem } from "../scraper/importPaths.js";
+import { startScan, startIndexPaths } from "../scanner/scanManager.js";
 import { pruneEmptyAncestorDirs } from "../scanner/pruneEmptyDirs.js";
 import { longestRepeatedRun } from "../transcription/quality.js";
 
@@ -89,7 +89,9 @@ export async function ingestUpload(meta: SyncUploadMeta, body: Readable): Promis
       .run();
   }
 
-  startScan(rootId, containerPath);
+  // One push wrote one known file, so index just that — a full walk would cost the same minute
+  // per pushed file no matter how small the transfer was.
+  startIndexPaths(rootId, containerPath, [relativePath]);
 }
 
 /**

@@ -10,6 +10,9 @@ import { imageMimeTypeForExtension } from "../streaming/rangeStream.js";
 import { startScan } from "../scanner/scanManager.js";
 import { foldersForReview, folderContents } from "../trash/folderContents.js";
 import { moveFolderToTrash } from "../trash/trashManager.js";
+import { mergeFolders, MergeError } from "../folders/mergeFolders.js";
+import { uploadToFolder, UploadError } from "../folders/uploadToFolder.js";
+import type { Readable } from "node:stream";
 
 function parsePagination(query: Record<string, unknown>) {
   const page = Math.max(1, Number(query.page) || 1);
@@ -31,6 +34,50 @@ function breadcrumbFor(folderId: number): { id: number; name: string }[] {
 
 export default async function foldersRoutes(fastify: FastifyInstance) {
   fastify.addHook("preHandler", fastify.requireAuth);
+
+  // The upload route takes raw audio bytes, not JSON. Scoped to this plugin instance only, the
+  // same way the sync ingest routes do it.
+  fastify.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
+    done(null, payload);
+  });
+
+  /** Candidate folders to merge into the one being viewed — the picker's search. */
+  fastify.get<{ Querystring: { q?: string; targetId?: string } }>("/folders/search", async (request, reply) => {
+    const targetId = Number(request.query.targetId);
+    const target = Number.isInteger(targetId)
+      ? db.select().from(folders).where(eq(folders.id, targetId)).get()
+      : undefined;
+
+    // A folder can't be merged into its own subfolder, so the target and everything above it are
+    // not offerable. Filtering them out here beats letting the user pick one and get an error.
+    const excluded = new Set<number>();
+    if (target) for (const crumb of breadcrumbFor(target.id)) excluded.add(crumb.id);
+
+    const tokens = (request.query.q ?? "").split(/\s+/).filter(Boolean);
+    const rows = db
+      .select({
+        id: folders.id,
+        name: folders.name,
+        relativePath: folders.relativePath,
+        fileCount: folders.fileCount,
+        libraryRootId: folders.libraryRootId,
+      })
+      .from(folders)
+      .all()
+      .filter(
+        (row) =>
+          row.relativePath !== "" &&
+          !excluded.has(row.id) &&
+          (!target || row.libraryRootId === target.libraryRootId) &&
+          tokens.every((token) => row.relativePath.toLowerCase().includes(token.toLowerCase()))
+      )
+      // Fuller folders first: merging into a stub is the common case, so the real one should be
+      // the easy pick rather than buried in an alphabetical list.
+      .sort((a, b) => b.fileCount - a.fileCount || a.relativePath.localeCompare(b.relativePath))
+      .slice(0, 30);
+
+    reply.send(rows);
+  });
 
   fastify.get("/folders/rated", async (_request, reply) => {
     const rows = db
@@ -193,6 +240,97 @@ export default async function foldersRoutes(fastify: FastifyInstance) {
         page,
         pageSize,
       });
+    }
+  );
+
+  fastify.put<{ Params: { id: string }; Body: { sourceUrl?: string | null } }>(
+    "/folders/:id/source-url",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      const folder = db.select().from(folders).where(eq(folders.id, id)).get();
+      if (!folder) {
+        reply.code(404).send({ error: "not found" });
+        return;
+      }
+
+      const raw = (request.body?.sourceUrl ?? "").trim();
+      let sourceUrl: string | null = null;
+      if (raw) {
+        let parsed: URL;
+        try {
+          parsed = new URL(raw);
+        } catch {
+          reply.code(400).send({ error: "that isn't a valid URL" });
+          return;
+        }
+        // The UI renders this as a clickable link, so anything but http(s) — javascript:, data: —
+        // has to be refused here rather than relying on the browser to be unhelpful about it.
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          reply.code(400).send({ error: "only http and https links are allowed" });
+          return;
+        }
+        sourceUrl = parsed.toString();
+      }
+
+      db.update(folders).set({ sourceUrl }).where(eq(folders.id, id)).run();
+      reply.send({ sourceUrl });
+    }
+  );
+
+  fastify.post<{ Params: { id: string }; Body: { sourceFolderId?: number } }>(
+    "/folders/:id/merge",
+    async (request, reply) => {
+      const sourceFolderId = Number(request.body?.sourceFolderId);
+      if (!Number.isInteger(sourceFolderId)) {
+        reply.code(400).send({ error: "sourceFolderId is required" });
+        return;
+      }
+      try {
+        reply.send(mergeFolders(Number(request.params.id), sourceFolderId));
+      } catch (err) {
+        if (err instanceof MergeError) {
+          reply.code(err.statusCode).send({ error: err.message });
+          return;
+        }
+        request.log.error({ err }, "folder merge failed");
+        reply.code(500).send({ error: err instanceof Error ? err.message : "merge failed" });
+      }
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    "/folders/:id/upload",
+    // A single audio file, so the route-level cap is generous but not the server-wide 5GB.
+    { bodyLimit: 2 * 1024 * 1024 * 1024 },
+    async (request, reply) => {
+      // Base64 in a header rather than a query param: filenames carry unicode, quotes and
+      // semicolons, none of which survive a raw header value intact.
+      const header = request.headers["x-upload-filename"];
+      if (typeof header !== "string") {
+        reply.code(400).send({ error: "missing X-Upload-Filename header" });
+        return;
+      }
+      let filename: string;
+      try {
+        filename = Buffer.from(header, "base64").toString("utf8");
+      } catch {
+        reply.code(400).send({ error: "invalid X-Upload-Filename header" });
+        return;
+      }
+      if (!filename.trim()) {
+        reply.code(400).send({ error: "a filename is required" });
+        return;
+      }
+      try {
+        reply.send(await uploadToFolder(Number(request.params.id), filename, request.body as Readable));
+      } catch (err) {
+        if (err instanceof UploadError) {
+          reply.code(err.statusCode).send({ error: err.message });
+          return;
+        }
+        request.log.error({ err }, "folder upload failed");
+        reply.code(500).send({ error: err instanceof Error ? err.message : "upload failed" });
+      }
     }
   );
 

@@ -49,6 +49,8 @@ export const folders = sqliteTable(
     fileCount: integer("file_count").notNull().default(0),
     totalDurationSec: real("total_duration_sec"),
     lastSeenAt: integer("last_seen_at").notNull(),
+    /** Where this folder's contents came from — a Soundgasm profile URL for imported folders. */
+    sourceUrl: text("source_url"),
   },
   (t) => ({
     uniqRootPath: uniqueIndex("idx_folders_root_path").on(t.libraryRootId, t.relativePath),

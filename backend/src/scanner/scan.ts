@@ -32,13 +32,210 @@ function joinRel(base: string, name: string): string {
   return base ? `${base}/${name}` : name;
 }
 
-function pickCoverImage(imageFiles: string[]): string | null {
+/** The folder-cover rule, exported so anything moving files around can apply the same one. */
+export function pickCoverImage(imageFiles: string[]): string | null {
   if (imageFiles.length === 0) return null;
   for (const priority of config.coverFilenamePriority) {
     const match = imageFiles.find((f) => path.parse(f).name.toLowerCase() === priority);
     if (match) return match;
   }
   return [...imageFiles].sort((a, b) => a.localeCompare(b))[0];
+}
+
+/**
+ * The statements the full walk and the targeted index both run. Prepared once per pass and shared
+ * so the two entry points can never drift into indexing a file two different ways.
+ */
+function createScanStatements(sqlite: Database.Database) {
+  return {
+    insertOrGetFolder: sqlite.prepare(`
+      INSERT INTO folders (library_root_id, parent_folder_id, relative_path, name, depth, last_seen_at)
+      VALUES (@libraryRootId, @parentFolderId, @relativePath, @name, @depth, @lastSeenAt)
+      ON CONFLICT(library_root_id, relative_path) DO UPDATE SET
+        parent_folder_id = excluded.parent_folder_id,
+        name = excluded.name,
+        depth = excluded.depth,
+        last_seen_at = excluded.last_seen_at
+      RETURNING id
+    `),
+
+    updateFolderCoverAndAggregate: sqlite.prepare(`
+      UPDATE folders SET cover_image_path = ?, file_count = ?, total_duration_sec = ? WHERE id = ?
+    `),
+
+    folderAggregate: sqlite.prepare(`
+      SELECT COUNT(*) AS fileCount, COALESCE(SUM(duration_sec), 0) AS totalDurationSec
+      FROM files WHERE folder_id = ? AND deleted_at IS NULL
+    `),
+
+    findFileByPath: sqlite.prepare(
+      `SELECT id, mtime_ms, size_bytes FROM files WHERE library_root_id = ? AND relative_path = ?`
+    ),
+
+    touchFile: sqlite.prepare(`UPDATE files SET last_seen_at = ? WHERE id = ?`),
+
+    insertFile: sqlite.prepare(`
+      INSERT INTO files (
+        library_root_id, folder_id, relative_path, filename, extension, size_bytes, mtime_ms, fingerprint,
+        duration_sec, title, track_number, parsed_author, parsed_series_or_book,
+        tag_title, tag_artist, tag_album, tag_track, tag_genre, cover_image_path,
+        first_seen_at, last_seen_at, deleted_at
+      ) VALUES (
+        @libraryRootId, @folderId, @relativePath, @filename, @extension, @sizeBytes, @mtimeMs, @fingerprint,
+        @durationSec, @title, @trackNumber, @parsedAuthor, @parsedSeriesOrBook,
+        @tagTitle, @tagArtist, @tagAlbum, @tagTrack, @tagGenre, @coverImagePath,
+        @firstSeenAt, @lastSeenAt, NULL
+      )
+    `),
+
+    updateFile: sqlite.prepare(`
+      UPDATE files SET
+        folder_id = @folderId, filename = @filename, extension = @extension, size_bytes = @sizeBytes,
+        mtime_ms = @mtimeMs, fingerprint = @fingerprint, duration_sec = @durationSec, title = @title,
+        track_number = @trackNumber, parsed_author = @parsedAuthor, parsed_series_or_book = @parsedSeriesOrBook,
+        tag_title = @tagTitle, tag_artist = @tagArtist, tag_album = @tagAlbum, tag_track = @tagTrack,
+        tag_genre = @tagGenre, cover_image_path = @coverImagePath, last_seen_at = @lastSeenAt, deleted_at = NULL
+      WHERE id = @id
+    `),
+  };
+}
+
+type ScanStatements = ReturnType<typeof createScanStatements>;
+
+interface IndexFileOptions {
+  libraryRootId: number;
+  absFilePath: string;
+  relativePath: string;
+  filename: string;
+  folderId: number;
+  folderNameChain: string[];
+  coverImagePath: string | null;
+  seenAt: number;
+}
+
+/**
+ * Indexes a single audio file, skipping the expensive tag/fingerprint read when size and mtime say
+ * nothing has changed. Returns false if the file isn't on disk (the caller decides whether that is
+ * routine — a file deleted mid-walk — or worth reporting).
+ */
+async function indexOneFile(
+  stmts: ScanStatements,
+  opts: IndexFileOptions,
+  progress: ScanProgress
+): Promise<boolean> {
+  const { libraryRootId, absFilePath, relativePath, filename, folderId, folderNameChain, coverImagePath, seenAt } =
+    opts;
+
+  progress.filesScanned++;
+
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(absFilePath);
+  } catch {
+    return false;
+  }
+  const mtimeMs = Math.round(stat.mtimeMs);
+
+  const existing = stmts.findFileByPath.get(libraryRootId, relativePath) as
+    | { id: number; mtime_ms: number; size_bytes: number }
+    | undefined;
+
+  if (existing && existing.mtime_ms === mtimeMs && existing.size_bytes === stat.size) {
+    stmts.touchFile.run(seenAt, existing.id);
+    return true;
+  }
+
+  progress.filesChanged++;
+  const tags = await readAudioTags(absFilePath);
+  const extension = path.extname(filename).toLowerCase();
+  const filenameNoExt = path.basename(filename, path.extname(filename));
+  const parsedName = parseFilename(filenameNoExt);
+  const folderContext = deriveFolderContext(folderNameChain);
+  const fingerprint = computeFingerprint(absFilePath, stat.size);
+
+  let coverForFile: string | null = coverImagePath;
+  if (!coverForFile && tags.picture) {
+    coverForFile = writeCoverCache(libraryRootId, relativePath, tags.picture);
+  }
+
+  const row = {
+    libraryRootId,
+    folderId,
+    relativePath,
+    filename,
+    extension,
+    sizeBytes: stat.size,
+    mtimeMs,
+    fingerprint,
+    durationSec: tags.durationSec,
+    title: tags.tagTitle ?? parsedName.title,
+    trackNumber: tags.tagTrack ?? parsedName.trackNumber,
+    parsedAuthor: folderContext.parsedAuthor,
+    parsedSeriesOrBook: folderContext.parsedSeriesOrBook,
+    tagTitle: tags.tagTitle,
+    tagArtist: tags.tagArtist,
+    tagAlbum: tags.tagAlbum,
+    tagTrack: tags.tagTrack,
+    tagGenre: tags.tagGenre,
+    coverImagePath: coverForFile,
+    firstSeenAt: seenAt,
+    lastSeenAt: seenAt,
+  };
+
+  if (existing) {
+    stmts.updateFile.run({ ...row, id: existing.id });
+  } else {
+    stmts.insertFile.run(row);
+  }
+  return true;
+}
+
+// Recompute aggregates from the DB rather than accumulating locally, so an incremental scan
+// (where most files hit the unchanged fast path above and are never re-parsed) still reflects
+// the true current totals instead of only the files touched this pass.
+function recomputeFolderAggregate(stmts: ScanStatements, folderId: number, coverImagePath: string | null) {
+  const aggregate = stmts.folderAggregate.get(folderId) as { fileCount: number; totalDurationSec: number };
+  stmts.updateFolderCoverAndAggregate.run(coverImagePath, aggregate.fileCount, aggregate.totalDurationSec, folderId);
+}
+
+/**
+ * Creates (or refreshes) the folder rows for every segment of `relativeDir`, returning the leaf
+ * folder's id. The full walk gets these for free on its way down; the targeted index has to build
+ * the chain itself, since an import can land in a folder that has never been scanned.
+ */
+function ensureFolderChain(
+  stmts: ScanStatements,
+  libraryRootId: number,
+  relativeDir: string,
+  seenAt: number
+): { folderId: number; folderNameChain: string[] } {
+  const rootRow = stmts.insertOrGetFolder.get({
+    libraryRootId,
+    parentFolderId: null,
+    relativePath: "",
+    name: "",
+    depth: 0,
+    lastSeenAt: seenAt,
+  }) as { id: number };
+
+  let folderId = rootRow.id;
+  const folderNameChain: string[] = [];
+  if (relativeDir) {
+    for (const name of relativeDir.split("/")) {
+      const parentFolderId = folderId;
+      folderNameChain.push(name);
+      const row = stmts.insertOrGetFolder.get({
+        libraryRootId,
+        parentFolderId,
+        relativePath: folderNameChain.join("/"),
+        name,
+        depth: folderNameChain.length,
+        lastSeenAt: seenAt,
+      }) as { id: number };
+      folderId = row.id;
+    }
+  }
+  return { folderId, folderNameChain };
 }
 
 export async function scanLibraryRoot(
@@ -49,57 +246,9 @@ export async function scanLibraryRoot(
 ): Promise<ScanResult> {
   const scanStartedAt = Date.now();
   const progress: ScanProgress = { foldersScanned: 0, filesScanned: 0, filesChanged: 0 };
+  const stmts = createScanStatements(sqlite);
 
-  const insertOrGetFolder = sqlite.prepare(`
-    INSERT INTO folders (library_root_id, parent_folder_id, relative_path, name, depth, last_seen_at)
-    VALUES (@libraryRootId, @parentFolderId, @relativePath, @name, @depth, @lastSeenAt)
-    ON CONFLICT(library_root_id, relative_path) DO UPDATE SET
-      parent_folder_id = excluded.parent_folder_id,
-      name = excluded.name,
-      depth = excluded.depth,
-      last_seen_at = excluded.last_seen_at
-    RETURNING id
-  `);
-
-  const updateFolderCoverAndAggregate = sqlite.prepare(`
-    UPDATE folders SET cover_image_path = ?, file_count = ?, total_duration_sec = ? WHERE id = ?
-  `);
-
-  const folderAggregate = sqlite.prepare(`
-    SELECT COUNT(*) AS fileCount, COALESCE(SUM(duration_sec), 0) AS totalDurationSec
-    FROM files WHERE folder_id = ? AND deleted_at IS NULL
-  `);
-
-  const findFileByPath = sqlite.prepare(
-    `SELECT id, mtime_ms, size_bytes FROM files WHERE library_root_id = ? AND relative_path = ?`
-  );
-  const touchFile = sqlite.prepare(`UPDATE files SET last_seen_at = ? WHERE id = ?`);
-
-  const insertFile = sqlite.prepare(`
-    INSERT INTO files (
-      library_root_id, folder_id, relative_path, filename, extension, size_bytes, mtime_ms, fingerprint,
-      duration_sec, title, track_number, parsed_author, parsed_series_or_book,
-      tag_title, tag_artist, tag_album, tag_track, tag_genre, cover_image_path,
-      first_seen_at, last_seen_at, deleted_at
-    ) VALUES (
-      @libraryRootId, @folderId, @relativePath, @filename, @extension, @sizeBytes, @mtimeMs, @fingerprint,
-      @durationSec, @title, @trackNumber, @parsedAuthor, @parsedSeriesOrBook,
-      @tagTitle, @tagArtist, @tagAlbum, @tagTrack, @tagGenre, @coverImagePath,
-      @firstSeenAt, @lastSeenAt, NULL
-    )
-  `);
-
-  const updateFile = sqlite.prepare(`
-    UPDATE files SET
-      folder_id = @folderId, filename = @filename, extension = @extension, size_bytes = @sizeBytes,
-      mtime_ms = @mtimeMs, fingerprint = @fingerprint, duration_sec = @durationSec, title = @title,
-      track_number = @trackNumber, parsed_author = @parsedAuthor, parsed_series_or_book = @parsedSeriesOrBook,
-      tag_title = @tagTitle, tag_artist = @tagArtist, tag_album = @tagAlbum, tag_track = @tagTrack,
-      tag_genre = @tagGenre, cover_image_path = @coverImagePath, last_seen_at = @lastSeenAt, deleted_at = NULL
-    WHERE id = @id
-  `);
-
-  const rootRow = insertOrGetFolder.get({
+  const rootRow = stmts.insertOrGetFolder.get({
     libraryRootId,
     parentFolderId: null,
     relativePath: "",
@@ -138,89 +287,29 @@ export async function scanLibraryRoot(
     const coverImagePath = coverImageName ? joinRel(entry.relativePath, coverImageName) : null;
 
     for (const dirent of audioFiles) {
-      progress.filesScanned++;
-      const absFilePath = path.join(entry.absPath, dirent.name);
-      const relativePath = joinRel(entry.relativePath, dirent.name);
-
-      let stat: fs.Stats;
-      try {
-        stat = await fs.promises.stat(absFilePath);
-      } catch {
-        continue;
-      }
-      const mtimeMs = Math.round(stat.mtimeMs);
-
-      const existing = findFileByPath.get(libraryRootId, relativePath) as
-        | { id: number; mtime_ms: number; size_bytes: number }
-        | undefined;
-
-      if (existing && existing.mtime_ms === mtimeMs && existing.size_bytes === stat.size) {
-        touchFile.run(scanStartedAt, existing.id);
-        onProgress?.(progress);
-        continue;
-      }
-
-      progress.filesChanged++;
-      const tags = await readAudioTags(absFilePath);
-      const extension = path.extname(dirent.name).toLowerCase();
-      const filenameNoExt = path.basename(dirent.name, path.extname(dirent.name));
-      const parsedName = parseFilename(filenameNoExt);
-      const folderContext = deriveFolderContext(entry.folderNameChain);
-      const fingerprint = computeFingerprint(absFilePath, stat.size);
-
-      let coverForFile: string | null = coverImagePath;
-      if (!coverForFile && tags.picture) {
-        coverForFile = writeCoverCache(libraryRootId, relativePath, tags.picture);
-      }
-
-      const row = {
-        libraryRootId,
-        folderId: entry.folderId,
-        relativePath,
-        filename: dirent.name,
-        extension,
-        sizeBytes: stat.size,
-        mtimeMs,
-        fingerprint,
-        durationSec: tags.durationSec,
-        title: tags.tagTitle ?? parsedName.title,
-        trackNumber: tags.tagTrack ?? parsedName.trackNumber,
-        parsedAuthor: folderContext.parsedAuthor,
-        parsedSeriesOrBook: folderContext.parsedSeriesOrBook,
-        tagTitle: tags.tagTitle,
-        tagArtist: tags.tagArtist,
-        tagAlbum: tags.tagAlbum,
-        tagTrack: tags.tagTrack,
-        tagGenre: tags.tagGenre,
-        coverImagePath: coverForFile,
-        firstSeenAt: scanStartedAt,
-        lastSeenAt: scanStartedAt,
-      };
-
-      if (existing) {
-        updateFile.run({ ...row, id: existing.id });
-      } else {
-        insertFile.run(row);
-      }
-
+      await indexOneFile(
+        stmts,
+        {
+          libraryRootId,
+          absFilePath: path.join(entry.absPath, dirent.name),
+          relativePath: joinRel(entry.relativePath, dirent.name),
+          filename: dirent.name,
+          folderId: entry.folderId,
+          folderNameChain: entry.folderNameChain,
+          coverImagePath,
+          seenAt: scanStartedAt,
+        },
+        progress
+      );
       onProgress?.(progress);
     }
 
-    // Recompute aggregates from the DB rather than accumulating locally, so an incremental scan
-    // (where most files hit the unchanged fast path above and are never re-parsed) still reflects
-    // the true current totals instead of only the files touched this pass.
-    const aggregate = folderAggregate.get(entry.folderId) as { fileCount: number; totalDurationSec: number };
-    updateFolderCoverAndAggregate.run(
-      coverImagePath,
-      aggregate.fileCount,
-      aggregate.totalDurationSec,
-      entry.folderId
-    );
+    recomputeFolderAggregate(stmts, entry.folderId, coverImagePath);
 
     for (const subdir of subdirs) {
       const childRelativePath = joinRel(entry.relativePath, subdir.name);
       const childFolderNameChain = [...entry.folderNameChain, subdir.name];
-      const childRow = insertOrGetFolder.get({
+      const childRow = stmts.insertOrGetFolder.get({
         libraryRootId,
         parentFolderId: entry.folderId,
         relativePath: childRelativePath,
@@ -243,6 +332,91 @@ export async function scanLibraryRoot(
   reconcileDeletedFolders(sqlite, libraryRootId, scanStartedAt);
 
   return { ...progress, movedFiles, deletedFiles };
+}
+
+export interface IndexPathsResult extends ScanResult {
+  /** Paths that were asked for but aren't on disk — a caller passing a path it just wrote should treat this as a bug. */
+  missingFiles: string[];
+}
+
+/**
+ * Indexes an explicit list of files instead of walking the whole root. An import knows exactly what
+ * it just wrote, so making it pay for a 6000-file walk to surface one new track is pure waste — the
+ * cost here is proportional to what actually landed, not to library size.
+ *
+ * Deliberately does NOT run the move/deletion reconciliation the full walk ends with: those work by
+ * treating every row not touched this pass as missing, which for a targeted pass is the entire
+ * library. Anything that removes or relocates files still needs a full scan.
+ *
+ * `relativePaths` are library-root-relative, forward-slash, matching files.relative_path.
+ */
+export async function indexFilePaths(
+  sqlite: Database.Database,
+  libraryRootId: number,
+  containerPath: string,
+  relativePaths: string[],
+  onProgress?: (p: ScanProgress) => void
+): Promise<IndexPathsResult> {
+  const seenAt = Date.now();
+  const progress: ScanProgress = { foldersScanned: 0, filesScanned: 0, filesChanged: 0 };
+  const stmts = createScanStatements(sqlite);
+  const missingFiles: string[] = [];
+
+  // Group by containing folder so each folder's directory listing (needed to pick its cover art)
+  // and its aggregate recount happen once per folder rather than once per imported file.
+  const pathsByDir = new Map<string, string[]>();
+  for (const rawPath of relativePaths) {
+    const relativePath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!relativePath) continue;
+    const slash = relativePath.lastIndexOf("/");
+    const dir = slash === -1 ? "" : relativePath.slice(0, slash);
+    const group = pathsByDir.get(dir);
+    if (group) group.push(relativePath);
+    else pathsByDir.set(dir, [relativePath]);
+  }
+
+  for (const [dir, paths] of pathsByDir) {
+    const absDir = path.join(containerPath, dir);
+    const { folderId, folderNameChain } = ensureFolderChain(stmts, libraryRootId, dir, seenAt);
+    progress.foldersScanned++;
+
+    // Same cover-art rule as the walk: a real image file beside the audio wins, and only when
+    // there is none does indexOneFile fall back to the file's own embedded picture.
+    let coverImagePath: string | null = null;
+    try {
+      const dirents = await fs.promises.readdir(absDir, { withFileTypes: true });
+      const imageNames = dirents
+        .filter((d) => d.isFile() && config.imageExtensions.includes(path.extname(d.name).toLowerCase()))
+        .map((d) => d.name);
+      const coverImageName = pickCoverImage(imageNames);
+      coverImagePath = coverImageName ? joinRel(dir, coverImageName) : null;
+    } catch {
+      // Folder vanished between download and index — indexOneFile reports each path as missing.
+    }
+
+    for (const relativePath of paths) {
+      const indexed = await indexOneFile(
+        stmts,
+        {
+          libraryRootId,
+          absFilePath: path.join(containerPath, relativePath),
+          relativePath,
+          filename: path.basename(relativePath),
+          folderId,
+          folderNameChain,
+          coverImagePath,
+          seenAt,
+        },
+        progress
+      );
+      if (!indexed) missingFiles.push(relativePath);
+      onProgress?.(progress);
+    }
+
+    recomputeFolderAggregate(stmts, folderId, coverImagePath);
+  }
+
+  return { ...progress, movedFiles: 0, deletedFiles: 0, missingFiles };
 }
 
 // Folders whose directory no longer exists on disk (removed directly, or emptied out and pruned

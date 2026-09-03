@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { libraryRoots, folders, files } from "../db/schema.js";
 import { listSoundgasmPosts, resolveSoundgasmPost, type SoundgasmPost } from "../scraper/soundgasm.js";
+import { markAlreadyImported } from "../scraper/existingImports.js";
 import { startSoundgasmDownload, getDownloadJob, retrySoundgasmDownload } from "../scraper/downloadManager.js";
 
 export default async function scrapeRoutes(fastify: FastifyInstance) {
@@ -15,8 +16,8 @@ export default async function scrapeRoutes(fastify: FastifyInstance) {
       return;
     }
     try {
-      const result = await listSoundgasmPosts(profileUrl);
-      reply.send(result);
+      const { username, posts } = await listSoundgasmPosts(profileUrl);
+      reply.send({ username, posts: markAlreadyImported(username, posts) });
     } catch (err) {
       reply.code(422).send({ error: err instanceof Error ? err.message : "failed to fetch profile" });
     }

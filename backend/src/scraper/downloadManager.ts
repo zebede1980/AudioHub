@@ -3,8 +3,12 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
-import { extractAudioUrl, type SoundgasmPost } from "./soundgasm.js";
-import { startScan } from "../scanner/scanManager.js";
+import { extractAudioUrl, profileUrlFor, type SoundgasmPost } from "./soundgasm.js";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "../db/client.js";
+import { folders } from "../db/schema.js";
+import { startIndexPaths } from "../scanner/scanManager.js";
+import { importFolderRelativePath, importFilenameStem } from "./importPaths.js";
 
 const USER_AGENT = "Mozilla/5.0 (compatible; AudioHub/1.0; personal library import)";
 // Soundgasm is a small, ad-hoc community site, not a CDN built for bulk access — space requests
@@ -30,6 +34,8 @@ export interface DownloadJobState {
   destDir: string;
   /** destDir relative to containerPath — matches how the scanner records folder paths. */
   folderRelativePath: string;
+  /** The uploader profile this job pulled from, stamped onto the folder once it is indexed. */
+  sourceUrl: string;
   items: DownloadItem[];
   startedAt: number;
   finishedAt?: number;
@@ -39,14 +45,6 @@ const jobs = new Map<string, DownloadJobState>();
 
 export function getDownloadJob(jobId: string): DownloadJobState | undefined {
   return jobs.get(jobId);
-}
-
-export function sanitizeForFilesystem(name: string, maxLength: number): string {
-  const cleaned = name
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return cleaned.slice(0, maxLength).trim() || "untitled";
 }
 
 function extensionFromUrl(url: string): string {
@@ -63,7 +61,7 @@ export function startSoundgasmDownload(
   // Always forward-slash, matching the scanner's relativePath convention (scan.ts joinRel) — using
   // the native path.join here would emit backslashes on Windows and permanently break the
   // relativePath-based DB lookups (download/:jobId/file and /folder) on a non-Docker/Windows host.
-  const folderRelativePath = ["Soundgasm", sanitizeForFilesystem(username, 100)].join("/");
+  const folderRelativePath = importFolderRelativePath(username);
   const destDir = path.join(containerPath, folderRelativePath);
   const job: DownloadJobState = {
     id: randomUUID(),
@@ -72,6 +70,7 @@ export function startSoundgasmDownload(
     containerPath,
     destDir,
     folderRelativePath,
+    sourceUrl: profileUrlFor(username),
     items: posts.map((p) => ({ title: p.title, postUrl: p.postUrl, status: "pending" })),
     startedAt: Date.now(),
   };
@@ -91,7 +90,7 @@ async function processItems(job: DownloadJobState, items: DownloadItem[]): Promi
     item.status = "downloading";
     try {
       const audioUrl = await extractAudioUrl(item.postUrl);
-      const filename = `${sanitizeForFilesystem(item.title, 150)}${extensionFromUrl(audioUrl)}`;
+      const filename = `${importFilenameStem(item.title)}${extensionFromUrl(audioUrl)}`;
       const destPath = path.join(job.destDir, filename);
       item.relativePath = [job.folderRelativePath, filename].join("/");
 
@@ -109,12 +108,45 @@ async function processItems(job: DownloadJobState, items: DownloadItem[]): Promi
   }
 }
 
+/**
+ * An import knows exactly which files it wrote, so it indexes just those rather than triggering a
+ * walk of the whole library — which costs the same minute whether one track landed or a hundred.
+ * "skipped" items are included too: the file is on disk, and if a previous run wrote it without
+ * ever being indexed this is what finally picks it up (an already-indexed one costs a stat).
+ */
+function indexDownloadedFiles(job: DownloadJobState): void {
+  const relativePaths = job.items
+    .filter((item) => item.status === "done" || item.status === "skipped")
+    .map((item) => item.relativePath)
+    .filter((relativePath): relativePath is string => Boolean(relativePath));
+  // Stamped after indexing, not before: for a first import from an uploader the folder row does
+  // not exist until the index creates it.
+  startIndexPaths(job.libraryRootId, job.containerPath, relativePaths, () => recordSourceUrl(job));
+}
+
+/**
+ * Records the uploader's profile page against the destination folder — only when it has none yet,
+ * so a link someone pointed somewhere else by hand isn't silently rewritten by a later import.
+ */
+function recordSourceUrl(job: DownloadJobState): void {
+  db.update(folders)
+    .set({ sourceUrl: job.sourceUrl })
+    .where(
+      and(
+        eq(folders.libraryRootId, job.libraryRootId),
+        eq(folders.relativePath, job.folderRelativePath),
+        isNull(folders.sourceUrl)
+      )
+    )
+    .run();
+}
+
 async function runDownloadJob(job: DownloadJobState): Promise<void> {
   fs.mkdirSync(job.destDir, { recursive: true });
   await processItems(job, job.items);
   job.status = "ok";
   job.finishedAt = Date.now();
-  startScan(job.libraryRootId, job.containerPath);
+  indexDownloadedFiles(job);
 }
 
 /**
@@ -139,7 +171,7 @@ export function retrySoundgasmDownload(jobId: string, postUrls?: string[]): Down
     .then(() => {
       job.status = "ok";
       job.finishedAt = Date.now();
-      startScan(job.libraryRootId, job.containerPath);
+      indexDownloadedFiles(job);
     })
     .catch((err) => {
       job.status = "error";

@@ -4,6 +4,8 @@ import { api } from "../client";
 export interface SoundgasmPost {
   title: string;
   postUrl: string;
+  /** Set by the profile listing: a file this post would save as is already in the library. */
+  alreadyInLibrary?: boolean;
 }
 
 export interface SoundgasmListResult {

@@ -39,7 +39,22 @@ export const api = {
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data !== undefined ? JSON.stringify(data) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  /** Posts raw bytes rather than JSON — for endpoints that take a file body directly. */
+  postBinary: <T>(path: string, body: Blob, headers?: Record<string, string>) =>
+    request<T>(path, {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/octet-stream", ...(headers ?? {}) },
+    }),
 };
+
+/** Base64 of a UTF-8 string, for putting a filename in a header — btoa alone throws on non-Latin1. */
+export function base64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
 
 export function fileStreamUrl(fileId: number): string {
   return `${BASE}/files/${fileId}/stream`;

@@ -210,6 +210,8 @@ export default function ImportSoundgasm() {
   const [listing, setListing] = useState<{ username: string; posts: SoundgasmPost[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
+  // On by default: the usual reason to re-list a profile is to find what's new since last time.
+  const [hideAlreadyInLibrary, setHideAlreadyInLibrary] = useState(true);
   const [libraryRootId, setLibraryRootId] = useState<number | undefined>(undefined);
   const [bulkJobId, setBulkJobId] = useState<string | undefined>(undefined);
   const [bulkLabel, setBulkLabel] = useState<string | undefined>(undefined);
@@ -226,8 +228,15 @@ export default function ImportSoundgasm() {
 
   const effectiveRootId = libraryRootId ?? roots?.[0]?.id;
 
+  const alreadyInLibraryCount = listing?.posts.filter((p) => p.alreadyInLibrary).length ?? 0;
   const filteredPosts =
-    listing?.posts.filter((p) => p.title.toLowerCase().includes(filterText.trim().toLowerCase())) ?? [];
+    listing?.posts.filter(
+      (p) =>
+        p.title.toLowerCase().includes(filterText.trim().toLowerCase()) &&
+        !(hideAlreadyInLibrary && p.alreadyInLibrary)
+    ) ?? [];
+  // Whether the list on screen is a subset — drives the "shown" wording on the select buttons.
+  const isFiltered = Boolean(filterText) || (hideAlreadyInLibrary && alreadyInLibraryCount > 0);
 
   async function onList(e: React.FormEvent) {
     e.preventDefault();
@@ -235,12 +244,15 @@ export default function ImportSoundgasm() {
     setListing(null);
     setBulkJobId(undefined);
     setFilterText("");
+    setHideAlreadyInLibrary(true);
     try {
       const result = await list.mutateAsync(profileUrl);
       setListing(result);
-      setSelected(
-        new Set(result.posts.length <= AUTO_SELECT_THRESHOLD ? result.posts.map((p) => p.postUrl) : [])
-      );
+      // Auto-select only what isn't already downloaded, and count against that: a profile with 90
+      // imported and 3 new should tick the 3 rather than nothing, which is what counting all the
+      // posts against the threshold used to do.
+      const newPosts = result.posts.filter((p) => !p.alreadyInLibrary);
+      setSelected(new Set(newPosts.length <= AUTO_SELECT_THRESHOLD ? newPosts.map((p) => p.postUrl) : []));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load profile");
     }
@@ -390,15 +402,17 @@ export default function ImportSoundgasm() {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
             <span>
-              {listing.username} — {filterText ? `${filteredPosts.length} of ${listing.posts.length}` : listing.posts.length}{" "}
-              post{listing.posts.length === 1 ? "" : "s"}, {selected.size} selected
+              {listing.username} —{" "}
+              {isFiltered ? `${filteredPosts.length} of ${listing.posts.length}` : listing.posts.length}{" "}
+              post{listing.posts.length === 1 ? "" : "s"}
+              {alreadyInLibraryCount > 0 && `, ${alreadyInLibraryCount} already in library`}, {selected.size} selected
             </span>
             <div className="flex gap-2">
               <button onClick={selectAllVisible} className="rounded bg-slate-800 px-2 py-1 text-xs">
-                Select all{filterText ? " shown" : ""}
+                Select all{isFiltered ? " shown" : ""}
               </button>
               <button onClick={selectNoneVisible} className="rounded bg-slate-800 px-2 py-1 text-xs">
-                Select none{filterText ? " shown" : ""}
+                Select none{isFiltered ? " shown" : ""}
               </button>
             </div>
           </div>
@@ -411,9 +425,26 @@ export default function ImportSoundgasm() {
             className="w-full rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
           />
 
+          {alreadyInLibraryCount > 0 && (
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={hideAlreadyInLibrary}
+                onChange={(e) => setHideAlreadyInLibrary(e.target.checked)}
+              />
+              Hide the {alreadyInLibraryCount} already in your library
+            </label>
+          )}
+
           <div className="max-h-96 space-y-1 overflow-y-auto rounded border border-slate-800 p-2">
             {filteredPosts.length === 0 && (
-              <div className="px-2 py-1 text-sm text-slate-500">No posts match "{filterText}".</div>
+              <div className="px-2 py-1 text-sm text-slate-500">
+                {filterText
+                  ? `No posts match "${filterText}".`
+                  : hideAlreadyInLibrary
+                    ? "Every post on this profile is already in your library."
+                    : "No posts."}
+              </div>
             )}
             {filteredPosts.map((post) => (
               <label
@@ -426,9 +457,19 @@ export default function ImportSoundgasm() {
                   onChange={() => toggle(post.postUrl)}
                   className="mt-1"
                 />
-                <span className="min-w-0 flex-1 truncate" title={post.title}>
+                <span
+                  className={`min-w-0 flex-1 truncate ${post.alreadyInLibrary ? "text-slate-500" : ""}`}
+                  title={post.title}
+                >
                   {post.title}
                 </span>
+                {/* Ticking one of these anyway is allowed — re-downloading is how you replace a
+                    file that arrived corrupt — but the download will skip it if it still exists. */}
+                {post.alreadyInLibrary && (
+                  <span className="mt-0.5 shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-emerald-500">
+                    In library
+                  </span>
+                )}
               </label>
             ))}
           </div>
