@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import argon2 from "argon2";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { users, loginAttempts } from "../db/schema.js";
 import { config } from "../config.js";
@@ -43,14 +43,23 @@ export default async function authRoutes(fastify: FastifyInstance) {
     { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } },
     async (request, reply) => {
       const ip = request.ip;
-      const { username, password } = request.body ?? { username: "", password: "" };
+      const { username: rawUsername, password } = request.body ?? { username: "", password: "" };
+      // Mobile keyboards love to capitalise the first letter and append a space,
+      // so match the username case-insensitively and ignore surrounding blanks.
+      const username = (rawUsername ?? "").trim();
 
       if (recentFailedAttempts(ip) >= MAX_FAILED_ATTEMPTS_PER_IP) {
         reply.code(429).send({ error: "Too many failed attempts. Try again later." });
         return;
       }
 
-      const user = username ? db.select().from(users).where(eq(users.username, username)).get() : undefined;
+      const user = username
+        ? db
+            .select()
+            .from(users)
+            .where(sql`lower(${users.username}) = lower(${username})`)
+            .get()
+        : undefined;
       const valid =
         user && password ? await argon2.verify(user.passwordHash, password).catch(() => false) : false;
 
