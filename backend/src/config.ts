@@ -55,8 +55,14 @@ export const config = {
     // Stops breaths/ambience being narrated as filler tokens in the first place.
     suppressNonSpeech: process.env.WHISPER_SUPPRESS_NON_SPEECH !== "false",
     // Voice activity detection: skip non-speech regions entirely, so the decoder never sees the
-    // silence that starts a spiral. Best-effort — if the model can't be fetched we run without it.
-    vadEnabled: process.env.WHISPER_VAD !== "false",
+    // silence that starts a spiral. Off by default — silero scores breathy, whispered and moaned
+    // delivery as non-speech, so on that kind of audio it discards most of the file and the
+    // transcript stops partway through while still looking like a clean result. Measured on a
+    // 6-minute file: 92% of the audio dropped at the default threshold, and still 75% at 0.05,
+    // so no threshold rescues it. maxContext and suppressNonSpeech already break the repetition
+    // spirals VAD was added for, and longestRepeatedRun flags whatever gets past them.
+    // Set WHISPER_VAD=true for a library of plain dialogue, where it is a large speed win.
+    vadEnabled: process.env.WHISPER_VAD === "true",
     vadModelName: process.env.WHISPER_VAD_MODEL_NAME ?? "ggml-silero-v5.1.2.bin",
     vadModelUrl:
       process.env.WHISPER_VAD_MODEL_URL ??

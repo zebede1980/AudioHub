@@ -59,6 +59,17 @@ export function runWhisper(
       }
 
       const languageMatch = stderr.match(/auto-detected language:\s*([a-z]{2,3})/i);
+
+      // whisper's stderr is otherwise discarded on success, which is how a VAD pass that threw
+      // away most of the audio went unnoticed: the transcript just looked terse rather than
+      // truncated. Surface the reduction so a bad filter is visible in the container log.
+      const vadReduction = stderr.match(/Reduced audio from \d+ to \d+ samples \(([\d.]+)% reduction\)/);
+      if (vadReduction) {
+        const speechMatch = stderr.match(/total duration of speech segments:\s*([\d.]+)/);
+        const speech = speechMatch ? `${speechMatch[1]}s kept, ` : "";
+        console.log(`whisper vad: ${speech}${vadReduction[1]}% of audio skipped for ${wavPath}`);
+      }
+
       resolve({ text, language: languageMatch ? languageMatch[1].toLowerCase() : null });
     });
   });
