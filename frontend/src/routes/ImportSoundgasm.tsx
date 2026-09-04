@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import { useLibraryRoots, useScanStatus } from "../api/hooks/library";
-import { useFolder } from "../api/hooks/folder";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import {
   useListSoundgasmPosts,
@@ -12,6 +11,7 @@ import {
   useRetrySoundgasmDownload,
   useSoundgasmDownloadStatus,
   useSoundgasmDownloadFolder,
+  useSoundgasmDownloadFiles,
   type SoundgasmPost,
 } from "../api/hooks/soundgasm";
 import { usePlayerStore } from "../player/usePlayerStore";
@@ -40,7 +40,6 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
   const retry = useRetrySoundgasmDownload(jobId);
   const settled = job.data !== undefined && job.data.status !== "running";
   const folderLink = useSoundgasmDownloadFolder(jobId, settled);
-  const { data: folder } = useFolder(folderLink.data?.folderId, { sort: "track" });
 
   // A finished download is not a finished import: it ends by kicking off a library scan, and only
   // once that scan has indexed the new audio does it appear in the folder listing below. Watching
@@ -48,6 +47,8 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
   // the same uploader, a stale) list — which reads as "the file was never saved".
   const { data: scan } = useScanStatus(job.data?.libraryRootId, settled);
   const isIndexing = settled && scan?.status === "running";
+  // Only this job's files, not the destination folder's listing — see useSoundgasmDownloadFiles.
+  const { data: imported } = useSoundgasmDownloadFiles(jobId, settled && !isIndexing);
 
   // Refresh the folder — and the folder link, which 404s until the scan creates the folder row —
   // once there is no scan left to wait for. This fires both when the download settles (covering a
@@ -55,6 +56,7 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
   useEffect(() => {
     if (!settled || isIndexing) return;
     queryClient.invalidateQueries({ queryKey: ["soundgasm-download-folder", jobId] });
+    queryClient.invalidateQueries({ queryKey: ["soundgasm-download-files", jobId] });
     queryClient.invalidateQueries({ queryKey: ["folder"] });
   }, [settled, isIndexing, jobId, queryClient]);
   const setRating = useSetRating();
@@ -157,11 +159,11 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
       {settled &&
         !isIndexing &&
         job.data.status === "ok" &&
-        folder &&
-        folder.files.length === 0 &&
+        imported &&
+        imported.files.length === 0 &&
         job.data.items.some((i) => i.status === "done" || i.status === "skipped") && (
           <div className="rounded border border-amber-900/60 bg-amber-950/30 p-2 text-xs text-amber-300">
-            The download finished but the library scan didn't pick anything up in this folder. The files are on disk
+            The download finished but the library scan didn't pick these up. The files are on disk
             under <code>{job.data.destDir}</code> — a rescan from{" "}
             <Link to="/settings" className="underline">
               Settings
@@ -170,9 +172,9 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
           </div>
         )}
 
-      {folder && folder.files.length > 0 && (
+      {imported && imported.files.length > 0 && (
         <div className="space-y-1">
-          {folder.files.map((file) => (
+          {imported.files.map((file) => (
             <FileRow
               key={file.id}
               file={file}
@@ -184,7 +186,7 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
               onEditTags={() => setEditingTagsFileId(file.id)}
             />
           ))}
-          {folder.files.length === folder.pageSize && folderLink.data && (
+          {folderLink.data && (
             <Link
               to={`/library/folder/${folderLink.data.folderId}`}
               className="block py-1 text-center text-xs text-indigo-400 hover:underline"

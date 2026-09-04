@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import type { FileRow } from "../types";
 
 export interface SoundgasmPost {
   title: string;
@@ -75,6 +76,19 @@ export function useSoundgasmDownloadStatus(jobId: string | undefined) {
     queryFn: () => api.get(`/scrape/soundgasm/download-status/${jobId}`),
     enabled: jobId !== undefined,
     refetchInterval: (query) => (query.state.data?.status === "running" ? 1000 : false),
+  });
+}
+
+/**
+ * The library rows for just the files this job imported. Preferred over the destination folder's
+ * listing for the post-import summary: that folder may already hold hundreds of tracks and is
+ * paginated, so a newly imported file can be missing from it entirely.
+ */
+export function useSoundgasmDownloadFiles(jobId: string | undefined, enabled: boolean) {
+  return useQuery<{ files: FileRow[] }>({
+    queryKey: ["soundgasm-download-files", jobId],
+    queryFn: () => api.get(`/scrape/soundgasm/download/${jobId}/files`),
+    enabled: enabled && jobId !== undefined,
   });
 }
 
