@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 /**
@@ -72,4 +73,31 @@ export function useUrlNumberList(key: string): [number[], (value: number[]) => v
           .map((part) => Number(part))
           .filter((n) => Number.isFinite(n));
   return [value, (next) => setParam(next.length === 0 ? null : next.join(","))];
+}
+
+/**
+ * A free-text value — a filter box's contents — held in the URL like everything else here, but
+ * with the typing kept in local state and only written to the URL once the user pauses. Writing
+ * on every keystroke would replace the history entry a dozen times per word for no benefit; the
+ * returned value updates immediately, so what is on screen never lags behind the keyboard.
+ */
+export function useUrlText(key: string): [string, (value: string) => void] {
+  const [searchParams] = useSearchParams();
+  const setParam = useParamSetter(key);
+  const urlValue = searchParams.get(key) ?? "";
+  const [value, setValue] = useState(urlValue);
+
+  // Picks up changes that came from outside this input — the back button, or a link into the
+  // screen with a filter already in it.
+  useEffect(() => setValue(urlValue), [urlValue]);
+
+  useEffect(() => {
+    if (value === urlValue) return;
+    const timer = setTimeout(() => setParam(value === "" ? null : value), 300);
+    return () => clearTimeout(timer);
+    // setParam is rebuilt every render; depending on it would restart the timer on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, urlValue]);
+
+  return [value, setValue];
 }

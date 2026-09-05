@@ -16,10 +16,32 @@ import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
 import PlayHistoryList from "../components/PlayHistoryList";
-import { useUrlBool, useUrlEnum, useUrlNumber } from "../utils/urlState";
+import FilterBox from "../components/FilterBox";
+import { filterTerms, matchesTerms, trackFields } from "../utils/listFilter";
+import { useUrlBool, useUrlEnum, useUrlNumber, useUrlText } from "../utils/urlState";
 import type { LibraryRoot, FileDetail, FileRow as FileRowType, RandomFile } from "../api/types";
 
 const RANDOM_BATCH_SIZE = 10;
+
+/** Every list on this screen takes the same filter, driven by the one box above the tabs. */
+interface FilterProps {
+  filter: string;
+  onFilterChange: (value: string) => void;
+}
+
+/** Shown in place of a list that the filter has emptied — a dead end otherwise, since the row
+ * you wanted may simply not be in this tab. */
+function NoMatches({ filter }: { filter: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-sm text-slate-400">
+      Nothing here matches "{filter}".{" "}
+      <Link to={`/search?q=${encodeURIComponent(filter)}`} className="text-indigo-400 underline">
+        Search the whole library
+      </Link>
+      .
+    </div>
+  );
+}
 
 /** Which list the Library home is showing, held in the URL as ?tab= so that leaving the screen
  * and coming back — the player's ← Back, the browser back button, a reload — returns to the same
@@ -63,9 +85,9 @@ function LibraryRootCard({ root }: { root: LibraryRoot }) {
  * which is how a 1-star pile gets reviewed before deletion and how a "2 star = look at this
  * later" pot gets found again. Kept in the URL (?stars=2) so the pile you are working through is
  * still there when you come back from the player. */
-function RatedFilesList() {
+function RatedFilesList({ filter, onFilterChange }: FilterProps) {
   const { data, isLoading } = useRatedFiles();
-  const [filter, setFilter] = useUrlNumber("stars");
+  const [starFilter, setStarFilter] = useUrlNumber("stars");
   const setRating = useSetRating();
   const clearRating = useClearRating();
   const play = usePlayerStore((s) => s.play);
@@ -82,7 +104,9 @@ function RatedFilesList() {
 
   const all = data ?? [];
   const countFor = (rating: number) => all.filter((f) => f.rating === rating).length;
-  const visible = filter === null ? all : all.filter((f) => f.rating === filter);
+  const byRating = starFilter === null ? all : all.filter((f) => f.rating === starFilter);
+  const terms = filterTerms(filter);
+  const visible = byRating.filter((f) => matchesTerms(terms, trackFields(f)));
 
   const picker = (
     <div className="flex items-center justify-between gap-2">
@@ -91,8 +115,8 @@ function RatedFilesList() {
       </label>
       <select
         id="rating-filter"
-        value={filter === null ? "all" : String(filter)}
-        onChange={(e) => setFilter(e.target.value === "all" ? null : Number(e.target.value))}
+        value={starFilter === null ? "all" : String(starFilter)}
+        onChange={(e) => setStarFilter(e.target.value === "all" ? null : Number(e.target.value))}
         className="rounded bg-slate-800 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
       >
         <option value="all">All ratings, highest first ({all.length})</option>
@@ -113,7 +137,15 @@ function RatedFilesList() {
     <div className="space-y-2">
       {picker}
 
-      {filter === 1 && visible.length > 0 && (
+      <FilterBox
+        value={filter}
+        onChange={onFilterChange}
+        placeholder="Filter rated tracks…"
+        matchCount={visible.length}
+        totalCount={byRating.length}
+      />
+
+      {starFilter === 1 && visible.length > 0 && (
         <div className="rounded-lg border border-slate-800 p-3 text-xs text-slate-500">
           Deleting these: Settings → Cleanup removes all 1-star <em>files</em> from disk. Whole
           folders rated 1 star are handled separately, in{" "}
@@ -125,9 +157,13 @@ function RatedFilesList() {
       )}
 
       {visible.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
-          No files rated {filter} star{filter === 1 ? "" : "s"}.
-        </div>
+        terms.length > 0 ? (
+          <NoMatches filter={filter} />
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
+            No files rated {starFilter} star{starFilter === 1 ? "" : "s"}.
+          </div>
+        )
       ) : null}
 
       {visible.map((entry) => {
@@ -161,7 +197,7 @@ function RatedFilesList() {
                 >
                   {entry.folderName}
                 </Link>
-                {filter !== null && (
+                {starFilter !== null && (
                   <>
                     <span>·</span>
                     <span className="flex-shrink-0">rated {new Date(entry.ratedAt).toLocaleDateString()}</span>
@@ -183,7 +219,7 @@ function RatedFilesList() {
   );
 }
 
-function RecentFilesList() {
+function RecentFilesList({ filter, onFilterChange }: FilterProps) {
   const { data, isLoading } = useRecentFiles();
   const setRating = useSetRating();
   const clearRating = useClearRating();
@@ -199,7 +235,8 @@ function RecentFilesList() {
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
-  if (!data || data.length === 0) {
+  const all = data ?? [];
+  if (all.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
         Nothing scanned in yet.
@@ -207,9 +244,23 @@ function RecentFilesList() {
     );
   }
 
+  const terms = filterTerms(filter);
+  const visible = all.filter((f) => matchesTerms(terms, trackFields(f)));
+
   return (
-    <div className="space-y-1">
-      {data.map((entry) => {
+    <div className="space-y-2">
+      <FilterBox
+        value={filter}
+        onChange={onFilterChange}
+        placeholder="Filter recently added…"
+        matchCount={visible.length}
+        totalCount={all.length}
+      />
+
+      {visible.length === 0 && <NoMatches filter={filter} />}
+
+      <div className="space-y-1">
+      {visible.map((entry) => {
         const file: FileRowType = {
           id: entry.id,
           filename: entry.filename,
@@ -247,6 +298,7 @@ function RecentFilesList() {
           />
         );
       })}
+      </div>
 
       {viewingTranscriptFileId !== null && (
         <TranscriptModal fileId={viewingTranscriptFileId} onClose={() => setViewingTranscriptFileId(null)} />
@@ -258,7 +310,7 @@ function RecentFilesList() {
   );
 }
 
-function RandomFilesList() {
+function RandomFilesList({ filter, onFilterChange }: FilterProps) {
   const queryClient = useQueryClient();
   const [includeRated, setIncludeRated] = useUrlBool("rated");
   const { data, isLoading, isFetching, refetch } = useRandomFiles(RANDOM_BATCH_SIZE, includeRated);
@@ -285,6 +337,10 @@ function RandomFilesList() {
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
+  const all = data ?? [];
+  const terms = filterTerms(filter);
+  const visible = all.filter((f) => matchesTerms(terms, trackFields(f)));
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -306,6 +362,18 @@ function RandomFilesList() {
         </button>
       </div>
 
+      {all.length > 0 && (
+        <FilterBox
+          value={filter}
+          onChange={onFilterChange}
+          placeholder="Filter this batch…"
+          matchCount={visible.length}
+          totalCount={all.length}
+        />
+      )}
+
+      {all.length > 0 && visible.length === 0 && <NoMatches filter={filter} />}
+
       {data && data.length === 0 && (
         <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
           {includeRated
@@ -315,7 +383,7 @@ function RandomFilesList() {
       )}
 
       <div className="space-y-1">
-        {data?.map((entry) => {
+        {visible.map((entry) => {
           const file: FileRowType = {
             id: entry.id,
             filename: entry.filename,
@@ -370,8 +438,18 @@ function RandomFilesList() {
 export default function LibraryRoots() {
   const { data: roots, isLoading } = useLibraryRoots();
   const [mode, setMode] = useUrlEnum("tab", LIBRARY_TABS, "folders");
+  // One filter for the whole screen, shared across tabs: having typed "storm" into Recently
+  // Added, flipping to Rated to see whether it is in there too should not mean typing it again.
+  const [filter, setFilter] = useUrlText("find");
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
+
+  // A handful of roots rarely needs filtering, so the box only appears once there are enough of
+  // them for it to be worth the row — and the filter only applies while that box is on screen,
+  // so a term carried over from another tab can't empty this one with no way to clear it.
+  const rootFilterShown = (roots?.length ?? 0) > 3;
+  const rootTerms = rootFilterShown ? filterTerms(filter) : [];
+  const visibleRoots = (roots ?? []).filter((root) => matchesTerms(rootTerms, [root.name, root.containerPath]));
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4">
@@ -417,13 +495,13 @@ export default function LibraryRoots() {
       </div>
 
       {mode === "rated" ? (
-        <RatedFilesList />
+        <RatedFilesList filter={filter} onFilterChange={setFilter} />
       ) : mode === "recent" ? (
-        <RecentFilesList />
+        <RecentFilesList filter={filter} onFilterChange={setFilter} />
       ) : mode === "random" ? (
-        <RandomFilesList />
+        <RandomFilesList filter={filter} onFilterChange={setFilter} />
       ) : mode === "history" ? (
-        <PlayHistoryList />
+        <PlayHistoryList filter={filter} onFilterChange={setFilter} />
       ) : !roots || roots.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
           No library folders added yet.{" "}
@@ -433,7 +511,22 @@ export default function LibraryRoots() {
           .
         </div>
       ) : (
-        roots.map((root) => <LibraryRootCard key={root.id} root={root} />)
+        <>
+          {rootFilterShown && (
+            <FilterBox
+              value={filter}
+              onChange={setFilter}
+              placeholder="Filter library folders…"
+              matchCount={visibleRoots.length}
+              totalCount={roots.length}
+            />
+          )}
+          {visibleRoots.length === 0 ? (
+            <NoMatches filter={filter} />
+          ) : (
+            visibleRoots.map((root) => <LibraryRootCard key={root.id} root={root} />)
+          )}
+        </>
       )}
     </div>
   );

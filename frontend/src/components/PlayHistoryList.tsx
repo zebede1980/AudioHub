@@ -7,6 +7,8 @@ import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "./FileRow";
 import TagEditor from "./TagEditor";
 import TranscriptModal from "./TranscriptModal";
+import FilterBox from "./FilterBox";
+import { filterTerms, matchesTerms, trackFields } from "../utils/listFilter";
 import type { FileDetail, FileRow as FileRowType } from "../api/types";
 
 /**
@@ -14,7 +16,13 @@ import type { FileDetail, FileRow as FileRowType } from "../api/types";
  * LibraryRoots.tsx because it is the only one with its own action (Clear) and modals to carry;
  * folding it in would have pushed that file past readable.
  */
-export default function PlayHistoryList() {
+export default function PlayHistoryList({
+  filter,
+  onFilterChange,
+}: {
+  filter: string;
+  onFilterChange: (value: string) => void;
+}) {
   const { data, isLoading } = usePlayHistory();
   const clear = useClearPlayHistory();
   const setRating = useSetRating();
@@ -31,13 +39,17 @@ export default function PlayHistoryList() {
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
-  if (!data || data.length === 0) {
+  const all = data ?? [];
+  if (all.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-slate-400">
         Nothing played yet.
       </div>
     );
   }
+
+  const terms = filterTerms(filter);
+  const visible = all.filter((entry) => matchesTerms(terms, trackFields(entry)));
 
   return (
     <div className="space-y-2">
@@ -53,8 +65,22 @@ export default function PlayHistoryList() {
         </button>
       </div>
 
+      <FilterBox
+        value={filter}
+        onChange={onFilterChange}
+        placeholder="Filter play history…"
+        matchCount={visible.length}
+        totalCount={all.length}
+      />
+
+      {visible.length === 0 && (
+        <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-sm text-slate-400">
+          Nothing in your history matches "{filter}".
+        </div>
+      )}
+
       <div className="space-y-1">
-        {data.map((entry) => {
+        {visible.map((entry) => {
           const file: FileRowType = {
             id: entry.fileId,
             filename: entry.filename,
