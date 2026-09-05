@@ -15,6 +15,17 @@ export function profileUrlFor(username: string): string {
   return `https://${SOUNDGASM_HOST}/u/${username}`;
 }
 
+/**
+ * Turns a captured run of post markup into plain text. Titles and blurbs here are written by
+ * uploaders and rendered raw, so a bare "<" is routine — a title ending "<3" is common. That is
+ * why the captures around this can't be "everything up to the next <", and why whatever they do
+ * capture has any *real* tags taken out here. The tag pattern requires a letter or "/" after the
+ * "<", so "<3" survives as the text it is.
+ */
+function htmlToText(markup: string): string {
+  return decodeHtmlEntities(markup.replace(/<\/?[a-zA-Z][^>]*>/g, "")).trim();
+}
+
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
@@ -73,6 +84,12 @@ export async function listSoundgasmPosts(profileUrl: string): Promise<{ username
   if (!res.ok) throw new Error(`profile page returned ${res.status}`);
   const html = await res.text();
 
+  return parseProfilePosts(html, requestedUsername);
+}
+
+/** The parsing half of {@link listSoundgasmPosts}, kept separate so the markup patterns can be
+ * tested against a fixture without going near the network. */
+export function parseProfilePosts(html: string, requestedUsername: string): { username: string; posts: SoundgasmPost[] } {
   const posts: SoundgasmPost[] = [];
   // Soundgasm's own username casing (as embedded in each post link) can differ from whatever
   // casing the profile URL happened to be typed in — its profile routing is case-insensitive,
@@ -81,16 +98,20 @@ export async function listSoundgasmPosts(profileUrl: string): Promise<{ username
   // The description span follows the title link inside the same block, separated by a line break.
   // Optional in the pattern: a post with no blurb still renders the (empty) span, but treating it
   // as required would silently drop any post whose markup differs.
+  //
+  // Every backslash here is doubled because this is a template literal, not a regex literal: `\s`
+  // in a template literal is just "s", so an un-doubled `[\s\S]` would quietly become the class
+  // [sS] and match almost nothing.
   const blockRegex = new RegExp(
-    `<div class="sound-details"><a href="(https://${SOUNDGASM_HOST}/u/([^/"]+)/[^"]*)">([^<]*)</a>` +
-      `(?:\\s*</?br\\s*/?>\\s*<span class="soundDescription">([^<]*)</span>)?`,
+    `<div class="sound-details"><a href="(https://${SOUNDGASM_HOST}/u/([^/"]+)/[^"]*)">([\\s\\S]*?)</a>` +
+      `(?:\\s*</?br\\s*/?>\\s*<span class="soundDescription">([\\s\\S]*?)</span>)?`,
     "gi"
   );
   for (const m of html.matchAll(blockRegex)) {
     const postUrl = m[1];
     username = m[2];
-    const title = decodeHtmlEntities(m[3]).trim();
-    const description = decodeHtmlEntities(m[4] ?? "").trim();
+    const title = htmlToText(m[3]);
+    const description = htmlToText(m[4] ?? "");
     posts.push(description ? { title, postUrl, description } : { title, postUrl });
   }
 
@@ -109,11 +130,14 @@ export async function resolveSoundgasmPost(postUrl: string): Promise<{ username:
   if (!res.ok) throw new Error(`post page returned ${res.status}`);
   const html = await res.text();
 
-  const match = html.match(/<div class="jp-title"[^>]*>([^<]*)<\/div>/i);
-  if (!match) throw new Error("could not find a title on this post — the page layout may have changed");
-  const title = decodeHtmlEntities(match[1]).trim();
+  return { username, post: { title: parsePostTitle(html), postUrl: canonicalUrl } };
+}
 
-  return { username, post: { title, postUrl: canonicalUrl } };
+/** The parsing half of {@link resolveSoundgasmPost}, separated for the same reason. */
+export function parsePostTitle(html: string): string {
+  const match = html.match(/<div class="jp-title"[^>]*>([\s\S]*?)<\/div>/i);
+  if (!match) throw new Error("could not find a title on this post — the page layout may have changed");
+  return htmlToText(match[1]);
 }
 
 export async function extractAudioUrl(postUrl: string): Promise<string> {
