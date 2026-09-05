@@ -5,6 +5,9 @@ const USER_AGENT = "Mozilla/5.0 (compatible; AudioHub/1.0; personal library impo
 export interface SoundgasmPost {
   title: string;
   postUrl: string;
+  /** The uploader's blurb under the title on the profile page. Often absent, and often several
+   * lines long — tags, script credits, content notes — so it is shown on hover, not inline. */
+  description?: string;
 }
 
 /** The canonical profile page for an uploader — what an imported folder records as its source. */
@@ -23,23 +26,44 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#39;/g, "'");
 }
 
-/** Throws if profileUrl isn't a soundgasm.net user profile URL — this endpoint must never be usable to fetch arbitrary URLs. */
+/** What a soundgasm username may contain — the charset a bare-username input is held to before
+ * it is pasted into a URL, so this endpoint can never be talked into fetching somewhere else. */
+const USERNAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Resolves whatever the user typed into a soundgasm profile, or throws — this endpoint must
+ * never be usable to fetch arbitrary URLs. Accepts, in order of how people actually type it:
+ * a bare username, a host-only paste with no scheme, a profile URL, and a URL to a single post
+ * (which resolves to the uploader's profile — the whole point of pasting one is "more like this").
+ */
 export function parseProfileUrl(profileUrl: string): { username: string; canonicalUrl: string } {
+  const input = profileUrl.trim();
+  if (!input) throw new Error("enter a soundgasm profile URL or username");
+
+  // A bare username, which is all most people have to hand — the rest of the URL is boilerplate.
+  if (USERNAME_PATTERN.test(input)) return canonicalProfile(input);
+
   let parsed: URL;
   try {
-    parsed = new URL(profileUrl);
+    // "soundgasm.net/u/name" is a URL to everyone except the URL parser; assume https.
+    parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`);
   } catch {
     throw new Error("not a valid URL");
   }
-  if (parsed.hostname !== SOUNDGASM_HOST) {
+  const hostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+  if (hostname !== SOUNDGASM_HOST) {
     throw new Error("only soundgasm.net profile URLs are supported");
   }
-  const match = parsed.pathname.match(/^\/u\/([^/]+)\/?$/);
+  // Anything after the username is a post (or deeper) — drop it and keep the uploader.
+  const match = parsed.pathname.match(/^\/u\/([^/]+)(?:\/.*)?$/);
   if (!match) {
     throw new Error("expected a profile URL like https://soundgasm.net/u/<username>");
   }
-  const username = match[1];
-  return { username, canonicalUrl: `https://${SOUNDGASM_HOST}/u/${username}` };
+  return canonicalProfile(match[1]);
+}
+
+function canonicalProfile(username: string): { username: string; canonicalUrl: string } {
+  return { username, canonicalUrl: profileUrlFor(username) };
 }
 
 export async function listSoundgasmPosts(profileUrl: string): Promise<{ username: string; posts: SoundgasmPost[] }> {
@@ -54,15 +78,20 @@ export async function listSoundgasmPosts(profileUrl: string): Promise<{ username
   // casing the profile URL happened to be typed in — its profile routing is case-insensitive,
   // so we read the canonical casing back off the page rather than assuming the input matches.
   let username = requestedUsername;
+  // The description span follows the title link inside the same block, separated by a line break.
+  // Optional in the pattern: a post with no blurb still renders the (empty) span, but treating it
+  // as required would silently drop any post whose markup differs.
   const blockRegex = new RegExp(
-    `<div class="sound-details"><a href="(https://${SOUNDGASM_HOST}/u/([^/"]+)/[^"]*)">([^<]*)</a>`,
+    `<div class="sound-details"><a href="(https://${SOUNDGASM_HOST}/u/([^/"]+)/[^"]*)">([^<]*)</a>` +
+      `(?:\\s*</?br\\s*/?>\\s*<span class="soundDescription">([^<]*)</span>)?`,
     "gi"
   );
   for (const m of html.matchAll(blockRegex)) {
     const postUrl = m[1];
     username = m[2];
     const title = decodeHtmlEntities(m[3]).trim();
-    posts.push({ title, postUrl });
+    const description = decodeHtmlEntities(m[4] ?? "").trim();
+    posts.push(description ? { title, postUrl, description } : { title, postUrl });
   }
 
   if (posts.length === 0) {

@@ -15,12 +15,23 @@ import {
   type SoundgasmPost,
 } from "../api/hooks/soundgasm";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { useImportStore } from "./importStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
 import type { FileDetail } from "../api/types";
 
 const AUTO_SELECT_THRESHOLD = 10;
+
+/**
+ * The hover text for a post row: the uploader's blurb when the profile page carried one, since
+ * that is where the tags, script credits and content notes live. Uploaders routinely open the
+ * blurb with the title itself, so the title is only prepended when it isn't already there.
+ */
+function postHoverText(post: SoundgasmPost): string {
+  if (!post.description) return post.title;
+  return post.description.startsWith(post.title) ? post.description : `${post.title}\n\n${post.description}`;
+}
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "text-slate-500",
@@ -208,19 +219,35 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
 }
 
 export default function ImportSoundgasm() {
-  const [profileUrl, setProfileUrl] = useState("");
-  const [listing, setListing] = useState<{ username: string; posts: SoundgasmPost[] } | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filterText, setFilterText] = useState("");
-  // On by default: the usual reason to re-list a profile is to find what's new since last time.
-  const [hideAlreadyInLibrary, setHideAlreadyInLibrary] = useState(true);
-  const [libraryRootId, setLibraryRootId] = useState<number | undefined>(undefined);
-  const [bulkJobId, setBulkJobId] = useState<string | undefined>(undefined);
-  const [bulkLabel, setBulkLabel] = useState<string | undefined>(undefined);
+  // Everything an import is mid-way through lives in a store rather than component state, so a
+  // trip to the player and back doesn't wipe the panels and listings off the screen.
+  const {
+    profileUrl,
+    manualPostUrl,
+    listing,
+    selected,
+    filterText,
+    hideAlreadyInLibrary,
+    libraryRootId,
+    bulkJob,
+    quickJobs,
+    setProfileUrl,
+    setManualPostUrl,
+    setListing,
+    clearListing,
+    setFilterText,
+    setHideAlreadyInLibrary,
+    setLibraryRootId,
+    toggleSelected,
+    setSelectedFor,
+    setBulkJob,
+    addQuickJob,
+    dismissQuickJob,
+  } = useImportStore();
+  // Errors are the exception: they belong to the attempt you just made, not to the screen, so
+  // they stay local and a fresh visit starts clean.
   const [error, setError] = useState<string | null>(null);
-  const [manualPostUrl, setManualPostUrl] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
-  const [quickJobs, setQuickJobs] = useState<{ jobId: string; label: string }[]>([]);
 
   const { data: roots } = useLibraryRoots();
   const list = useListSoundgasmPosts();
@@ -243,18 +270,17 @@ export default function ImportSoundgasm() {
   async function onList(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setListing(null);
-    setBulkJobId(undefined);
-    setFilterText("");
-    setHideAlreadyInLibrary(true);
+    clearListing();
     try {
       const result = await list.mutateAsync(profileUrl);
-      setListing(result);
       // Auto-select only what isn't already downloaded, and count against that: a profile with 90
       // imported and 3 new should tick the 3 rather than nothing, which is what counting all the
       // posts against the threshold used to do.
       const newPosts = result.posts.filter((p) => !p.alreadyInLibrary);
-      setSelected(new Set(newPosts.length <= AUTO_SELECT_THRESHOLD ? newPosts.map((p) => p.postUrl) : []));
+      setListing(result, new Set(newPosts.length <= AUTO_SELECT_THRESHOLD ? newPosts.map((p) => p.postUrl) : []));
+      // The server takes a username or a single-track URL as readily as a profile URL; echo back
+      // what it resolved to, so it's clear which uploader is being listed.
+      setProfileUrl(`https://soundgasm.net/u/${result.username}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load profile");
     }
@@ -277,36 +303,19 @@ export default function ImportSoundgasm() {
         username,
         posts: [post],
       });
-      setQuickJobs((prev) => [{ jobId, label: `Soundgasm/${username}` }, ...prev]);
+      addQuickJob({ jobId, label: `Soundgasm/${username}` });
       setManualPostUrl("");
     } catch (err) {
       setManualError(err instanceof ApiError ? err.message : "Failed to import post");
     }
   }
 
-  function toggle(postUrl: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(postUrl)) next.delete(postUrl);
-      else next.add(postUrl);
-      return next;
-    });
-  }
-
   function selectAllVisible() {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      filteredPosts.forEach((p) => next.add(p.postUrl));
-      return next;
-    });
+    setSelectedFor(filteredPosts.map((p) => p.postUrl), true);
   }
 
   function selectNoneVisible() {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      filteredPosts.forEach((p) => next.delete(p.postUrl));
-      return next;
-    });
+    setSelectedFor(filteredPosts.map((p) => p.postUrl), false);
   }
 
   async function onDownload() {
@@ -319,8 +328,7 @@ export default function ImportSoundgasm() {
         username: listing.username,
         posts,
       });
-      setBulkJobId(jobId);
-      setBulkLabel(`Soundgasm/${listing.username}`);
+      setBulkJob({ jobId, label: `Soundgasm/${listing.username}` });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to start download");
     }
@@ -373,7 +381,7 @@ export default function ImportSoundgasm() {
               key={qj.jobId}
               jobId={qj.jobId}
               label={qj.label}
-              onDismiss={() => setQuickJobs((prev) => prev.filter((j) => j.jobId !== qj.jobId))}
+              onDismiss={() => dismissQuickJob(qj.jobId)}
             />
           ))}
         </div>
@@ -384,7 +392,7 @@ export default function ImportSoundgasm() {
       <form onSubmit={onList} className="flex gap-2">
         <input
           type="text"
-          placeholder="https://soundgasm.net/u/username — bulk import from a profile"
+          placeholder="Uploader name or URL — bulk import from a profile"
           value={profileUrl}
           onChange={(e) => setProfileUrl(e.target.value)}
           className="flex-1 rounded bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -400,7 +408,7 @@ export default function ImportSoundgasm() {
 
       {error && <div className="text-sm text-red-400">{error}</div>}
 
-      {listing && !bulkJobId && (
+      {listing && !bulkJob && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
             <span>
@@ -456,12 +464,12 @@ export default function ImportSoundgasm() {
                 <input
                   type="checkbox"
                   checked={selected.has(post.postUrl)}
-                  onChange={() => toggle(post.postUrl)}
+                  onChange={() => toggleSelected(post.postUrl)}
                   className="mt-1"
                 />
                 <span
                   className={`min-w-0 flex-1 truncate ${post.alreadyInLibrary ? "text-slate-500" : ""}`}
-                  title={post.title}
+                  title={postHoverText(post)}
                 >
                   {post.title}
                 </span>
@@ -486,7 +494,7 @@ export default function ImportSoundgasm() {
         </div>
       )}
 
-      {bulkJobId && bulkLabel && <ImportJobPanel jobId={bulkJobId} label={bulkLabel} />}
+      {bulkJob && <ImportJobPanel jobId={bulkJob.jobId} label={bulkJob.label} />}
     </div>
   );
 }

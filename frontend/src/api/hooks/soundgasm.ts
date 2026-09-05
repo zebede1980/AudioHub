@@ -5,6 +5,9 @@ import type { FileRow } from "../types";
 export interface SoundgasmPost {
   title: string;
   postUrl: string;
+  /** The uploader's blurb under the title on the profile page — tags, script credits, content
+   * notes. Often absent, and often several lines long, so the UI shows it on hover. */
+  description?: string;
   /** Set by the profile listing: a file this post would save as is already in the library. */
   alreadyInLibrary?: boolean;
 }
