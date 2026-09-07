@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { usePlayerStore } from "../player/usePlayerStore";
 import { fileCoverUrl } from "../api/client";
 
@@ -46,15 +46,10 @@ export default function MiniPlayer() {
           )}
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{currentFile.title ?? currentFile.filename}</div>
-            {subtitle && (
-              <Link
-                to={`/library/folder/${currentFile.folderId}`}
-                onClick={(e) => e.stopPropagation()}
-                className="block truncate text-xs text-slate-400 hover:text-indigo-400 hover:underline"
-              >
-                {subtitle}
-              </Link>
-            )}
+            {/* Deliberately not a link to the folder: it sits inside the tap target that opens
+                the player, and on a phone it was far too easy to land on it and get thrown into
+                the folder listing instead. The folder is one tap away from the player screen. */}
+            {subtitle && <div className="truncate text-xs text-slate-400">{subtitle}</div>}
           </div>
         </div>
         <button
