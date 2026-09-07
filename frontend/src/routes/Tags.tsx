@@ -72,7 +72,10 @@ export default function Tags() {
                 role="button"
                 title={`Delete tag "${tag.name}"`}
                 onClick={(e) => onDeleteTag(e, tag.id, tag.name)}
-                className="ml-0.5 hidden text-xs opacity-70 hover:opacity-100 group-hover:inline"
+                // Revealed on hover on a mouse, but always visible on a touch screen: iOS treats
+                // the first tap on something that only appears on hover as the hover itself and
+                // swallows the click, so a hover-only ✕ made every tag need tapping twice.
+                className="ml-0.5 text-xs opacity-60 hover:opacity-100 [@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover:inline"
               >
                 ✕
               </span>
