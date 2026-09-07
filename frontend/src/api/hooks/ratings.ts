@@ -12,6 +12,9 @@ function invalidateFileRatingConsumers(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["recent-files"] });
   queryClient.invalidateQueries({ queryKey: ["play-history"] });
   queryClient.invalidateQueries({ queryKey: ["tags-tracks"] });
+  // The import screen lists the tracks a download job brought in from its own endpoint, not from
+  // the folder listing, so it needs invalidating by name or a star set there never lights up.
+  queryClient.invalidateQueries({ queryKey: ["soundgasm-download-files"] });
 }
 
 function invalidateFolderRatingConsumers(queryClient: QueryClient) {

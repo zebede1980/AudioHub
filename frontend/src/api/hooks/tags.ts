@@ -54,6 +54,7 @@ export function useSetFileTags() {
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["rated-files"] });
       queryClient.invalidateQueries({ queryKey: ["play-history"] });
+      queryClient.invalidateQueries({ queryKey: ["soundgasm-download-files"] });
     },
   });
 }
