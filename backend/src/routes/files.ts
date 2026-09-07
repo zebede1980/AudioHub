@@ -178,8 +178,11 @@ export default async function filesRoutes(fastify: FastifyInstance) {
     const index = siblings.findIndex((s) => s.id === id);
     const prevFileId = index > 0 ? siblings[index - 1].id : null;
     const nextFileId = index >= 0 && index < siblings.length - 1 ? siblings[index + 1].id : null;
+    // The folder's first track, so the player can wrap around at the end of the last one in
+    // repeat-folder mode without walking the prev chain a request at a time.
+    const firstFileId = siblings.length > 0 ? siblings[0].id : null;
 
-    reply.send({ ...file, rating: rating?.rating ?? null, prevFileId, nextFileId });
+    reply.send({ ...file, rating: rating?.rating ?? null, prevFileId, nextFileId, firstFileId });
   });
 
   fastify.get<{ Params: { id: string } }>("/files/:id/stream", async (request, reply) => {

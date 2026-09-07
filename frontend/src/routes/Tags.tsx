@@ -2,13 +2,13 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTags, useDeleteTag, useTracksByTags } from "../api/hooks/tags";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
-import { api } from "../api/client";
+import { playFromList } from "../player/playFromList";
 import { usePlayerStore } from "../player/usePlayerStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
 import { useUrlEnum, useUrlNumberList } from "../utils/urlState";
-import type { FileDetail, FileRow as FileRowType } from "../api/types";
+import type { FileRow as FileRowType } from "../api/types";
 
 /** ?tags=3,7&match=any — the selection is the whole point of this screen, so it has to survive
  * playing something and coming back. */
@@ -20,7 +20,6 @@ export default function Tags() {
   const [selectedIds, setSelectedIds] = useUrlNumberList("tags");
   const [mode, setMode] = useUrlEnum("match", MATCH_MODES, "all");
   const { data, isLoading: tracksLoading } = useTracksByTags(selectedIds, mode);
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const setRating = useSetRating();
   const clearRating = useClearRating();
@@ -39,10 +38,10 @@ export default function Tags() {
     }
   }
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
+  const matchingFiles = data?.files ?? [];
+  const selectedNames = (tags ?? []).filter((t) => selectedIds.includes(t.id)).map((t) => t.name);
+  const playFile = (fileId: number) =>
+    playFromList(fileId, matchingFiles.map((f) => f.id), selectedNames.length > 0 ? `Tag: ${selectedNames.join(", ")}` : "Tags");
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4">

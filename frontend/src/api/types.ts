@@ -94,6 +94,8 @@ export interface FileDetail {
   rating: number | null;
   prevFileId: number | null;
   nextFileId: number | null;
+  /** First track of the same folder — where repeat-folder wraps back to. */
+  firstFileId: number | null;
 }
 
 export interface RatedFolder {

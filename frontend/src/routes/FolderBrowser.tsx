@@ -5,15 +5,14 @@ import MergeFolderModal from "../components/MergeFolderModal";
 import FolderSourceLink from "../components/FolderSourceLink";
 import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
 import { useTranscribeFolder, useTranscriptionStatus, useCancelTranscription } from "../api/hooks/transcribe";
-import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import FolderGrid from "../components/FolderGrid";
 import FileRow from "../components/FileRow";
 import RatingStars from "../components/RatingStars";
 import TranscriptModal from "../components/TranscriptModal";
 import TagEditor from "../components/TagEditor";
 import { useUrlEnum, useUrlNumber } from "../utils/urlState";
-import type { FileDetail } from "../api/types";
 
 /** Sort orders and the page number live in the URL, so a folder you have paged and re-sorted is
  * still in that state when you come back to it from the player or with the back button. */
@@ -78,7 +77,6 @@ export default function FolderBrowser() {
   const clearRating = useClearRating();
   const setFolderRating = useSetFolderRating();
   const clearFolderRating = useClearFolderRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
@@ -87,10 +85,6 @@ export default function FolderBrowser() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useUploadToFolder(id);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   function uploadFiles(picked: FileList | null) {
     if (!picked?.length) return;
@@ -125,6 +119,11 @@ export default function FolderBrowser() {
 
   const { folder, breadcrumb, subfolders, files } = data;
   const hasMore = files.length === data.pageSize;
+  // The queue is this page of the folder in the order it is sorted on screen, which is not
+  // necessarily the folder's own track order. A folder long enough to be paged keeps playing
+  // past the end of the page in folder order rather than stopping there.
+  const playFile = (fileId: number) =>
+    playFromList(fileId, files.map((f) => f.id), folder.name, { continueInFolder: hasMore });
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4">

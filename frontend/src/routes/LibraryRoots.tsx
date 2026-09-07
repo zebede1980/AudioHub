@@ -10,8 +10,8 @@ import {
   randomFilesQueryKey,
 } from "../api/hooks/library";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
-import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
@@ -19,7 +19,7 @@ import PlayHistoryList from "../components/PlayHistoryList";
 import FilterBox from "../components/FilterBox";
 import { filterTerms, matchesTerms, trackFields } from "../utils/listFilter";
 import { useUrlBool, useUrlEnum, useUrlNumber, useUrlText } from "../utils/urlState";
-import type { LibraryRoot, FileDetail, FileRow as FileRowType, RandomFile } from "../api/types";
+import type { LibraryRoot, FileRow as FileRowType, RandomFile } from "../api/types";
 
 const RANDOM_BATCH_SIZE = 10;
 
@@ -90,15 +90,10 @@ function RatedFilesList({ filter, onFilterChange }: FilterProps) {
   const [starFilter, setStarFilter] = useUrlNumber("stars");
   const setRating = useSetRating();
   const clearRating = useClearRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
@@ -107,6 +102,8 @@ function RatedFilesList({ filter, onFilterChange }: FilterProps) {
   const byRating = starFilter === null ? all : all.filter((f) => f.rating === starFilter);
   const terms = filterTerms(filter);
   const visible = byRating.filter((f) => matchesTerms(terms, trackFields(f)));
+  const playFile = (fileId: number) =>
+    playFromList(fileId, visible.map((f) => f.id), starFilter === null ? "Rated tracks" : `${starFilter}-star tracks`);
 
   const picker = (
     <div className="flex items-center justify-between gap-2">
@@ -223,15 +220,10 @@ function RecentFilesList({ filter, onFilterChange }: FilterProps) {
   const { data, isLoading } = useRecentFiles();
   const setRating = useSetRating();
   const clearRating = useClearRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
@@ -246,6 +238,7 @@ function RecentFilesList({ filter, onFilterChange }: FilterProps) {
 
   const terms = filterTerms(filter);
   const visible = all.filter((f) => matchesTerms(terms, trackFields(f)));
+  const playFile = (fileId: number) => playFromList(fileId, visible.map((f) => f.id), "Recently added");
 
   return (
     <div className="space-y-2">
@@ -316,15 +309,10 @@ function RandomFilesList({ filter, onFilterChange }: FilterProps) {
   const { data, isLoading, isFetching, refetch } = useRandomFiles(RANDOM_BATCH_SIZE, includeRated);
   const setRating = useSetRating();
   const clearRating = useClearRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   // Patches the currently-displayed batch in place rather than invalidating it — invalidating
   // would refetch, and since this list is ORDER BY RANDOM() server-side, that would reshuffle the
@@ -340,6 +328,7 @@ function RandomFilesList({ filter, onFilterChange }: FilterProps) {
   const all = data ?? [];
   const terms = filterTerms(filter);
   const visible = all.filter((f) => matchesTerms(terms, trackFields(f)));
+  const playFile = (fileId: number) => playFromList(fileId, visible.map((f) => f.id), "Random picks");
 
   return (
     <div className="space-y-3">

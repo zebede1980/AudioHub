@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, ApiError } from "../api/client";
+import { ApiError } from "../api/client";
 import { useLibraryRoots, useScanStatus } from "../api/hooks/library";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
 import {
@@ -15,11 +15,11 @@ import {
   type SoundgasmPost,
 } from "../api/hooks/soundgasm";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import { useImportStore } from "./importStore";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
-import type { FileDetail } from "../api/types";
 
 const AUTO_SELECT_THRESHOLD = 10;
 
@@ -72,17 +72,12 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
   }, [settled, isIndexing, jobId, queryClient]);
   const setRating = useSetRating();
   const clearRating = useClearRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
   if (!job.data) return null;
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   const failedItems = job.data.items.filter((i) => i.status === "error");
   const busy = job.data.status === "running" || retry.isPending;
@@ -190,7 +185,7 @@ function ImportJobPanel({ jobId, label, onDismiss }: { jobId: string; label: str
               key={file.id}
               file={file}
               isCurrent={currentFile?.id === file.id}
-              onPlay={() => playFile(file.id)}
+              onPlay={() => playFromList(file.id, imported.files.map((f) => f.id), "Imported tracks")}
               onRate={(rating) => setRating.mutate({ fileId: file.id, rating })}
               onClearRating={() => clearRating.mutate(file.id)}
               onViewTranscript={() => setViewingTranscriptFileId(file.id)}

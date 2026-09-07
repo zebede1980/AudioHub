@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { usePlayerStore } from "../player/usePlayerStore";
+import { usePlayerStore, SLEEP_TIMER_MINUTES } from "../player/usePlayerStore";
 import { fileCoverUrl } from "../api/client";
 import RatingStars from "../components/RatingStars";
 import TagEditor from "../components/TagEditor";
@@ -15,6 +15,12 @@ import {
 } from "../api/hooks/transcribe";
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
+const REPEAT_LABELS = {
+  off: "Repeat off — tap to repeat this track",
+  one: "Repeating this track — tap to repeat the whole list",
+  all: "Repeating the whole list — tap to turn repeat off",
+} as const;
 
 function TagsSection({ fileId, onEdit }: { fileId: number; onEdit: () => void }) {
   const { data: fileTags } = useFileTags(fileId);
@@ -145,9 +151,22 @@ export default function PlayerScreen() {
   const prev = usePlayerStore((s) => s.prev);
   const setVolume = usePlayerStore((s) => s.setVolume);
   const setPlaybackRate = usePlayerStore((s) => s.setPlaybackRate);
+  const repeatMode = usePlayerStore((s) => s.repeatMode);
+  const queue = usePlayerStore((s) => s.queue);
+  const cycleRepeatMode = usePlayerStore((s) => s.cycleRepeatMode);
+  const sleepTimerMinutes = usePlayerStore((s) => s.sleepTimerMinutes);
+  const sleepSecondsLeft = usePlayerStore((s) => s.sleepSecondsLeft);
+  const startSleepTimer = usePlayerStore((s) => s.startSleepTimer);
+  const cancelSleepTimer = usePlayerStore((s) => s.cancelSleepTimer);
   const setRating = useSetRating();
   const clearRating = useClearRating();
   const [editingTags, setEditingTags] = useState(false);
+
+  // Only counts as "playing from" a list while the current track is actually in it — skipping out
+  // of the queue (from the mini player's folder link, say) shouldn't leave a stale position on
+  // screen.
+  const queueIndex = queue && currentFile ? queue.ids.indexOf(currentFile.id) : -1;
+  const queuePosition = queueIndex >= 0 ? queueIndex + 1 : null;
 
   if (!currentFile) {
     return (
@@ -186,6 +205,12 @@ export default function PlayerScreen() {
           </Link>
         )}
       </div>
+
+      {queuePosition !== null && (
+        <div className="-mt-4 text-center text-xs text-slate-500">
+          Playing from {queue!.label} · {queuePosition} of {queue!.ids.length}
+        </div>
+      )}
 
       <RatingStars
         value={currentFile.rating}
@@ -251,6 +276,44 @@ export default function PlayerScreen() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="flex w-full items-center justify-between gap-3">
+        <button
+          onClick={cycleRepeatMode}
+          title={REPEAT_LABELS[repeatMode]}
+          aria-label={REPEAT_LABELS[repeatMode]}
+          className={`flex items-center gap-1.5 rounded px-2 py-1 text-sm ${
+            repeatMode === "off" ? "bg-slate-800 text-slate-400" : "bg-indigo-600 text-white"
+          }`}
+        >
+          <span className="text-base">{repeatMode === "one" ? "🔂" : "🔁"}</span>
+          <span className="text-xs">
+            {repeatMode === "one" ? "Track" : repeatMode === "all" ? (queuePosition !== null ? "List" : "Folder") : "Repeat"}
+          </span>
+        </button>
+
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-slate-400" htmlFor="sleep-timer">
+            Sleep
+          </label>
+          {sleepSecondsLeft !== null && (
+            <span className="tabular-nums text-xs text-indigo-400">{formatTime(sleepSecondsLeft)} left</span>
+          )}
+          <select
+            id="sleep-timer"
+            value={sleepTimerMinutes ?? ""}
+            onChange={(e) => (e.target.value === "" ? cancelSleepTimer() : startSleepTimer(Number(e.target.value)))}
+            className="rounded bg-slate-800 px-1 py-1 text-sm"
+          >
+            <option value="">Off</option>
+            {SLEEP_TIMER_MINUTES.map((m) => (
+              <option key={m} value={m}>
+                {m} min
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <TagsSection fileId={currentFile.id} onEdit={() => setEditingTags(true)} />

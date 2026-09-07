@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useSearch } from "../api/hooks/folder";
-import { api } from "../api/client";
 import { folderCoverUrl } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import { useSetRating, useClearRating, useSetFolderRating, useClearFolderRating } from "../api/hooks/ratings";
 import RatingStars from "../components/RatingStars";
 import FileRow from "../components/FileRow";
 import TagEditor from "../components/TagEditor";
 import TranscriptModal from "../components/TranscriptModal";
-import type { FileDetail, FileRow as FileRowType } from "../api/types";
+import type { FileRow as FileRowType } from "../api/types";
 
 export default function Search() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -32,7 +32,6 @@ export default function Search() {
     return () => clearTimeout(timer);
   }, [q, urlQuery, setSearchParams]);
   const { data, isLoading } = useSearch(q);
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const navigate = useNavigate();
   const setRating = useSetRating();
@@ -42,10 +41,9 @@ export default function Search() {
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
+  const results = data?.files ?? [];
+  const playFile = (fileId: number) =>
+    playFromList(fileId, results.map((f) => f.id), q ? `Search "${q}"` : "Search results");
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4">

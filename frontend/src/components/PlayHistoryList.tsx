@@ -2,14 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { usePlayHistory, useClearPlayHistory } from "../api/hooks/history";
 import { useSetRating, useClearRating } from "../api/hooks/ratings";
-import { api } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import FileRow from "./FileRow";
 import TagEditor from "./TagEditor";
 import TranscriptModal from "./TranscriptModal";
 import FilterBox from "./FilterBox";
 import { filterTerms, matchesTerms, trackFields } from "../utils/listFilter";
-import type { FileDetail, FileRow as FileRowType } from "../api/types";
+import type { FileRow as FileRowType } from "../api/types";
 
 /**
  * The Library home's History tab. Lives here rather than beside its sibling lists in
@@ -27,15 +27,10 @@ export default function PlayHistoryList({
   const clear = useClearPlayHistory();
   const setRating = useSetRating();
   const clearRating = useClearRating();
-  const play = usePlayerStore((s) => s.play);
   const currentFile = usePlayerStore((s) => s.currentFile);
   const [editingTagsFileId, setEditingTagsFileId] = useState<number | null>(null);
   const [viewingTranscriptFileId, setViewingTranscriptFileId] = useState<number | null>(null);
 
-  async function playFile(fileId: number) {
-    const file = await api.get<FileDetail>(`/files/${fileId}`);
-    play(file);
-  }
 
   if (isLoading) return <div className="p-6 text-slate-400">Loading…</div>;
 
@@ -50,6 +45,7 @@ export default function PlayHistoryList({
 
   const terms = filterTerms(filter);
   const visible = all.filter((entry) => matchesTerms(terms, trackFields(entry)));
+  const playFile = (fileId: number) => playFromList(fileId, visible.map((e) => e.fileId), "Play history");
 
   return (
     <div className="space-y-2">

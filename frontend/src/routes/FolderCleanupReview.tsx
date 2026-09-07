@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFoldersForReview, useFolderContents, useDeleteFolders } from "../api/hooks/library";
 import { useClearFolderRating } from "../api/hooks/ratings";
-import { api, folderCoverUrl } from "../api/client";
+import { folderCoverUrl } from "../api/client";
 import { usePlayerStore } from "../player/usePlayerStore";
+import { playFromList } from "../player/playFromList";
 import RatingStars from "../components/RatingStars";
 import { useGoBack } from "../utils/navigation";
-import type { FileDetail, FolderReviewRow } from "../api/types";
+import type { FolderReviewRow } from "../api/types";
 
 /** Which folders are ticked survives a trip to the player screen and back — reviewing a big
  * folder often means listening to something, and losing the checkboxes for it would push the user
@@ -53,11 +54,6 @@ function formatWhen(ms: number | null): string | null {
   return new Date(ms).toLocaleDateString();
 }
 
-async function playFileById(fileId: number) {
-  const file = await api.get<FileDetail>(`/files/${fileId}`);
-  usePlayerStore.getState().play(file);
-}
-
 /** The reasons a folder might be here by mistake, spelled out rather than left for the user to
  * infer from a file count. */
 function warningsFor(folder: FolderReviewRow): string[] {
@@ -96,7 +92,9 @@ function FolderContentsList({ folderId }: { folderId: number }) {
             className={`flex items-center gap-2 rounded px-2 py-1.5 ${isCurrent ? "bg-slate-800" : "hover:bg-slate-800/60"}`}
           >
             <button
-              onClick={() => (isCurrent ? togglePlay() : playFileById(file.id))}
+              onClick={() =>
+                isCurrent ? togglePlay() : playFromList(file.id, data.files.map((f) => f.id), "Folder review")
+              }
               title={isCurrent && isPlaying ? "Pause" : "Play — the review list stays exactly where it is"}
               aria-label={isCurrent && isPlaying ? "Pause" : `Play ${file.title ?? file.filename}`}
               className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs text-slate-100"
